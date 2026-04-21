@@ -1,0 +1,6 @@
+로컬 컴퓨터로 접속하려면
+npm run dev -- --host
+
+
+정상 실행은
+npm run dev
