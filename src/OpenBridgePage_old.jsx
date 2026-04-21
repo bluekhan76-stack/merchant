@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-// 실제 설치된 앱 패키지명으로 맞춰주세요.
-// 과거 대화 기준 후보: com.bncomm.bluekhanbleflutter
-const ANDROID_PACKAGE = "com.bncomm.bluekhanbleflutter";
+const ANDROID_PACKAGE = "com.bluekhan.bleflutter";
 const IOS_APP_STORE_URL = "https://apps.apple.com/app/id1234567890";
 const ANDROID_STORE_URL = `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE}`;
 
@@ -34,7 +32,6 @@ export default function OpenBridgePage() {
   const [status, setStatus] = useState("앱을 여는 중입니다...");
   const [showFallback, setShowFallback] = useState(false);
   const openedRef = useRef(false);
-  const fallbackTimerRef = useRef(null);
 
   const appUrl = useMemo(() => buildCustomSchemeUrl(code), [code]);
   const androidIntentUrl = useMemo(() => buildAndroidIntentUrl(code), [code]);
@@ -51,67 +48,52 @@ export default function OpenBridgePage() {
       return;
     }
 
+    let fallbackTimer;
+    let visibilityTimer;
+
     const onVisibilityChange = () => {
       if (document.hidden) {
         openedRef.current = true;
-        setShowFallback(false);
       }
-    };
-
-    const onPageHide = () => {
-      openedRef.current = true;
-      setShowFallback(false);
     };
 
     document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("pagehide", onPageHide);
 
-    const clearFallbackTimer = () => {
-      if (fallbackTimerRef.current) {
-        clearTimeout(fallbackTimerRef.current);
-        fallbackTimerRef.current = null;
+    const tryOpenApp = () => {
+      setStatus("앱을 여는 중입니다...");
+
+      if (isAndroid) {
+        window.location.href = androidIntentUrl;
+
+        setTimeout(() => {
+          if (!openedRef.current) {
+            window.location.href = appUrl;
+          }
+        }, 400);
+      } else {
+        window.location.href = appUrl;
       }
-    };
 
-    const scheduleFallback = () => {
-      clearFallbackTimer();
-      fallbackTimerRef.current = setTimeout(() => {
+      fallbackTimer = setTimeout(() => {
         if (!openedRef.current && !document.hidden) {
           setStatus("앱이 설치되어 있지 않거나 실행에 실패했습니다.");
           setShowFallback(true);
         }
       }, 1800);
-    };
 
-    const tryOpenApp = () => {
-      openedRef.current = false;
-      setShowFallback(false);
-      setStatus("앱을 여는 중입니다...");
-
-      if (isAndroid) {
-        // Android에서는 intent URL이 가장 먼저 시도되도록 함
-        window.location.replace(androidIntentUrl);
-
-        // 일부 브라우저에서는 intent가 무시될 수 있어 custom scheme도 한 번 더 시도
-        setTimeout(() => {
-          if (!openedRef.current && !document.hidden) {
-            window.location.href = appUrl;
-          }
-        }, 500);
-      } else {
-        // iOS 및 기타 브라우저
-        window.location.href = appUrl;
-      }
-
-      scheduleFallback();
+      visibilityTimer = setTimeout(() => {
+        if (!openedRef.current && !document.hidden) {
+          setShowFallback(true);
+        }
+      }, 2200);
     };
 
     tryOpenApp();
 
     return () => {
-      clearFallbackTimer();
+      clearTimeout(fallbackTimer);
+      clearTimeout(visibilityTimer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("pagehide", onPageHide);
     };
   }, [code, isAndroid, appUrl, androidIntentUrl]);
 
@@ -121,19 +103,16 @@ export default function OpenBridgePage() {
     setStatus("앱을 다시 여는 중입니다...");
 
     if (isAndroid) {
-      window.location.replace(androidIntentUrl);
+      window.location.href = androidIntentUrl;
       setTimeout(() => {
-        if (!document.hidden) {
-          window.location.href = appUrl;
-        }
-      }, 500);
+        window.location.href = appUrl;
+      }, 400);
     } else {
       window.location.href = appUrl;
     }
 
-    if (fallbackTimerRef.current) clearTimeout(fallbackTimerRef.current);
-    fallbackTimerRef.current = setTimeout(() => {
-      if (!openedRef.current && !document.hidden) {
+    setTimeout(() => {
+      if (!document.hidden) {
         setShowFallback(true);
         setStatus("앱을 실행하지 못했습니다.");
       }
@@ -173,7 +152,7 @@ export default function OpenBridgePage() {
         )}
 
         <p style={styles.help}>
-          설치 후 앱이 자동으로 열리지 않으면, 앱을 직접 실행한 뒤 링크 또는 QR을 다시 사용해 주세요.
+          설치 후 앱이 자동으로 열리지 않으면, 앱을 실행한 뒤 QR을 다시 스캔해 주세요.
         </p>
       </div>
     </div>

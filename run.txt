@@ -4,3 +4,10 @@ npm run dev -- --host
 
 정상 실행은
 npm run dev
+
+
+코드 수정 후 GIT
+
+git add .
+git commit -m "update"
+git push origin main
