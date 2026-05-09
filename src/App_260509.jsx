@@ -4,7 +4,6 @@ import OpenBridgePage from "./OpenBridgePage.jsx";
 const STORAGE_KEYS = {
   merchant: "merchant_owner_demo_profile",
   invites: "merchant_owner_demo_invites",
-  favorites: "merchant_owner_demo_favorites",
 };
 
 const API_BASE_URL =
@@ -20,11 +19,6 @@ const BARRIER_OPTIONS = [
   { id: "gate-2", name: "차단기 2" },
   { id: "gate-3", name: "차단기 3" },
   { id: "gate-4", name: "차단기 4" },
-];
-
-const ISSUE_METHOD_OPTIONS = [
-  { value: "sms", label: "SMS 링크" },
-  { value: "qr", label: "QR Code" },
 ];
 
 const DURATION_OPTIONS = [
@@ -128,7 +122,6 @@ function statusTone(status) {
   if (status === "앱 수신") return "bg-emerald-50 text-emerald-700";
   if (status === "만료") return "bg-rose-50 text-rose-700";
   if (status === "재발송") return "bg-amber-50 text-amber-700";
-  if (status === "사용 완료") return "bg-blue-50 text-blue-700";
   if (status === "취소") return "bg-slate-200 text-slate-700";
   return "bg-slate-100 text-slate-700";
 }
@@ -175,8 +168,6 @@ function sanitizeInvite(item) {
     createdAt: item?.createdAt || nowIso(),
     serverSynced: item?.serverSynced ?? false,
     serverInviteUrl: item?.serverInviteUrl || "",
-    issueMethod: item?.issueMethod || item?.deliveryMethod || (item?.phone === "QR 스캔 발급" ? "qr" : "sms"),
-    usedAt: item?.usedAt || "",
   };
 }
 
@@ -245,7 +236,6 @@ function buildInitialForm(defaultGateId = BARRIER_OPTIONS[0].id) {
     ticketValidFrom: nowValue,
     ticketValidUntil: addMinutesToLocalDateTimeValue(nowValue, 60),
     customValidityRange: false,
-    issueMethod: "sms",
   };
 }
 
@@ -269,7 +259,6 @@ function buildPendingPass({ form, merchant, invites }) {
     ticketValidFrom: new Date(form.ticketValidFrom).toISOString(),
     ticketValidUntil: new Date(form.ticketValidUntil).toISOString(),
     usageLimit: Number(form.usageLimit),
-    issueMethod: form.issueMethod || "sms",
     status: "발행 완료",
     createdAt: nowIso(),
     history,
@@ -408,10 +397,7 @@ export default function App() {
   const [apiStatus, setApiStatus] = useState("");
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [qrTicket, setQrTicket] = useState(null);
-  const [qrTicketUsed, setQrTicketUsed] = useState(false);
   const [qrBusy, setQrBusy] = useState(false);
-  const [favorites, setFavorites] = useState([]);
-  const [favoriteName, setFavoriteName] = useState("");
 
   useEffect(() => {
     try {
@@ -456,20 +442,12 @@ export default function App() {
         setInvites(seed);
         localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(seed));
       }
-
-      const savedFavorites = localStorage.getItem(STORAGE_KEYS.favorites);
-      if (savedFavorites) {
-        const parsedFavorites = JSON.parse(savedFavorites);
-        setFavorites(Array.isArray(parsedFavorites) ? parsedFavorites : []);
-      }
     } catch {
       const seed = makeSeedInvites();
       setMerchant(defaultMerchant);
       setInvites(seed);
       localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(defaultMerchant));
       localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(seed));
-      setFavorites([]);
-      localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify([]));
     }
   }, []);
 
@@ -617,53 +595,6 @@ export default function App() {
     }));
   }
 
-  function persistFavorites(nextFavorites) {
-    setFavorites(nextFavorites);
-    localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify(nextFavorites));
-  }
-
-  function saveCurrentAsFavorite() {
-    const name = favoriteName.trim() || `즐겨찾기 ${favorites.length + 1}`;
-    const selectedGateIds = normalizeGateIds(form.selectedGateIds);
-    const nextFavorite = {
-      id: safeUuid(),
-      name,
-      durationMinutes: form.durationMinutes,
-      usageLimit: form.usageLimit,
-      ticketValidFrom: form.ticketValidFrom,
-      ticketValidUntil: form.ticketValidUntil,
-      customValidityRange: form.customValidityRange,
-      issueMethod: form.issueMethod || "sms",
-      selectedGateIds,
-      createdAt: nowIso(),
-    };
-    persistFavorites([nextFavorite, ...favorites].slice(0, 8));
-    setFavoriteName("");
-    setToast("현재 발행 조건을 즐겨찾기에 저장했습니다.");
-  }
-
-  function applyFavorite(favorite) {
-    const validGateIds = normalizeGateIds(favorite.selectedGateIds).filter((id) =>
-      merchant.parkingGates.some((gate) => gate.id === id)
-    );
-    setForm((prev) => ({
-      ...prev,
-      durationMinutes: String(favorite.durationMinutes || "60"),
-      usageLimit: String(Math.min(Math.max(Number(favorite.usageLimit || 1), 1), Math.max(remainingPasses, 1))),
-      ticketValidFrom: favorite.ticketValidFrom || prev.ticketValidFrom,
-      ticketValidUntil: favorite.ticketValidUntil || prev.ticketValidUntil,
-      customValidityRange: favorite.customValidityRange ?? true,
-      issueMethod: favorite.issueMethod || "sms",
-      selectedGateIds: validGateIds.length > 0 ? validGateIds : prev.selectedGateIds,
-    }));
-    setToast(`${favorite.name} 조건을 불러왔습니다.`);
-  }
-
-  function removeFavorite(favoriteId) {
-    persistFavorites(favorites.filter((item) => item.id !== favoriteId));
-    setToast("즐겨찾기를 삭제했습니다.");
-  }
-
   function resetForm() {
     setForm(buildInitialForm(merchant.parkingGates?.[0]?.id || defaultMerchant.parkingGates[0].id));
     setError("");
@@ -730,8 +661,8 @@ export default function App() {
         usageLimit: pendingPass.usageLimit,
         ticketValidFrom: pendingPass.ticketValidFrom,
         ticketValidUntil: pendingPass.ticketValidUntil,
-        issueMethod: pendingPass.issueMethod || form.issueMethod || "sms",
-        deliveryMethod: pendingPass.issueMethod || form.issueMethod || "sms",
+        issueMethod: "sms",
+        deliveryMethod: "sms",
         merchantShopName: merchant.shopName,
         merchantOwnerName: merchant.ownerName,
         merchantPhone: merchant.phone,
@@ -749,7 +680,6 @@ export default function App() {
           inviteId,
           inviteCode,
           status: "발행 완료",
-          issueMethod: pendingPass.issueMethod || form.issueMethod || "sms",
           serverSynced: true,
           serverInviteUrl: inviteUrl,
         }),
@@ -852,7 +782,6 @@ export default function App() {
         ticketValidUntil: validUntil.toISOString(),
         usageLimit,
         status: "발행 완료",
-        issueMethod: "qr",
         createdAt: nowIso(),
         serverSynced: true,
         serverInviteUrl: inviteUrl,
@@ -863,7 +792,6 @@ export default function App() {
         ...newQrInvite,
         inviteUrl,
       });
-      setQrTicketUsed(false);
       setQrModalOpen(true);
       setToast("QR 주차권이 서버에 등록되었습니다.");
       setApiStatus("");
@@ -903,14 +831,11 @@ export default function App() {
     const seed = makeSeedInvites();
     localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(defaultMerchant));
     localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(seed));
-    localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify([]));
     setMerchant(defaultMerchant);
     setInvites(seed);
-    setFavorites([]);
     setPendingPass(null);
     setConfirmModalOpen(false);
     setQrTicket(null);
-    setQrTicketUsed(false);
     setQrModalOpen(false);
     resetForm();
     setShowHistoryPanel(false);
@@ -1087,51 +1012,19 @@ export default function App() {
 
             <div className="rounded-2xl border p-4">
               <div className="flex flex-col items-center gap-3">
-                {qrTicketUsed ? (
-                  <div className="flex h-64 w-64 items-center justify-center rounded-2xl border border-dashed bg-slate-50 p-6 text-center text-lg font-bold text-slate-500">
-                    새로 발급해 주세요
-                  </div>
-                ) : (
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(qrTicket.inviteUrl)}`}
-                    alt="QR Code"
-                    className="h-64 w-64 rounded-2xl border bg-white p-2"
-                  />
-                )}
-                <p className="text-xs text-slate-500">
-                  방문자 폰으로 스캔하면 서버에 등록된 실제 주차권 코드로 열립니다. 사용 처리 후에는 같은 팝업에서 새 QR을 발행할 수 있습니다.
-                </p>
-                {!qrTicketUsed ? (
-                  <div className="w-full rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-700 break-all">
-                    {qrTicket.inviteUrl}
-                  </div>
-                ) : null}
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(qrTicket.inviteUrl)}`}
+                  alt="QR Code"
+                  className="h-64 w-64 rounded-2xl border bg-white p-2"
+                />
+                <p className="text-xs text-slate-500">방문자 폰으로 스캔하면 서버에 등록된 실제 주차권 코드로 열립니다.</p>
+                <div className="w-full rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-700 break-all">
+                  {qrTicket.inviteUrl}
+                </div>
               </div>
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  const usedAt = nowIso();
-                  setQrTicketUsed(true);
-                  setQrTicket((prev) => (prev ? { ...prev, status: "사용 완료", usedAt } : prev));
-                  persistInvites(invites.map((item) => item.id === qrTicket.id ? { ...item, status: "사용 완료", usedAt } : item));
-                  setToast("QR 사용 처리되었습니다. 새로 발급해 주세요.");
-                }}
-                disabled={qrTicketUsed}
-                className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                사용 처리
-              </button>
-              <button
-                type="button"
-                onClick={handleIssueQrPass}
-                disabled={qrBusy}
-                className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {qrBusy ? "발행 중..." : "새 QR 발행"}
-              </button>
               <button
                 type="button"
                 onClick={async () => {
@@ -1142,8 +1035,7 @@ export default function App() {
                     setError("클립보드 복사에 실패했습니다.");
                   }
                 }}
-                disabled={qrTicketUsed}
-                className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50"
               >
                 링크 복사
               </button>
@@ -1173,46 +1065,6 @@ export default function App() {
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
                 잔여 주차권 {remainingPasses}건
               </span>
-            </div>
-
-            <div className="mb-3 rounded-2xl border border-amber-100 bg-amber-50/60 p-2">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-[12px] font-semibold text-amber-900">자주 쓰는 발행 조건</p>
-                  <p className="text-[10px] text-amber-800">유효시간, 횟수, 시작/종료 시간, 발행 방식을 저장하고 다시 불러옵니다.</p>
-                </div>
-                <div className="flex gap-1.5">
-                  <input
-                    value={favoriteName}
-                    onChange={(e) => setFavoriteName(e.target.value)}
-                    className="min-w-0 rounded-md border bg-white px-2 py-1 text-[12px] outline-none focus:border-amber-400"
-                    placeholder="예: 1시간 1회 QR"
-                  />
-                  <button
-                    type="button"
-                    onClick={saveCurrentAsFavorite}
-                    className="shrink-0 rounded-md bg-amber-900 px-2.5 py-1 text-[12px] font-semibold text-white hover:opacity-90"
-                  >
-                    저장
-                  </button>
-                </div>
-              </div>
-
-              {favorites.length > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {favorites.map((favorite) => (
-                    <div key={favorite.id} className="flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] ring-1 ring-amber-200">
-                      <button type="button" onClick={() => applyFavorite(favorite)} className="font-semibold text-amber-950 hover:underline">
-                        {favorite.name}
-                      </button>
-                      <span className="text-amber-700">{displayDuration(favorite.durationMinutes)} · {favorite.usageLimit}회 · {favorite.issueMethod === "qr" ? "QR" : "SMS"}</span>
-                      <button type="button" onClick={() => removeFavorite(favorite.id)} className="ml-1 text-amber-700 hover:text-rose-600">
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
             </div>
 
             <div className="grid grid-cols-2 gap-1.5">
@@ -1269,23 +1121,6 @@ export default function App() {
                     className="min-w-0 w-14 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none focus:border-slate-400"
                   />
                   <span className="truncate text-[10px] text-slate-500">/{remainingPasses}</span>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 col-span-2">
-                <div className="flex items-center gap-1.5">
-                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">방식</label>
-                  <select
-                    value={form.issueMethod}
-                    onChange={(e) => handleChange("issueMethod", e.target.value)}
-                    className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none focus:border-slate-400"
-                  >
-                    {ISSUE_METHOD_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
                 </div>
               </div>
 
@@ -1479,7 +1314,6 @@ export default function App() {
                             <p>대상 차단기: {row.parkingGateNames.join(", ")}</p>
                             <p>유효시간: {displayDuration(row.durationMinutes)}</p>
                             <p>사용 가능 횟수: {row.usageLimit}회</p>
-                            <p>발행 방식: {row.issueMethod === "qr" ? "QR Code" : "SMS 링크"}</p>
                             <p>생성 시각: {displayDate(row.createdAt)}</p>
                             <p className="sm:col-span-2">주차권 사용기간: {displayDate(row.ticketValidFrom)} ~ {displayDate(row.ticketValidUntil)}</p>
                             <p className="sm:col-span-2">메모: {row.memo || "-"}</p>
