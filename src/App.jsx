@@ -122,6 +122,14 @@ function deepLinkFor(phone, inviteId, inviteCode) {
   return url.toString();
 }
 
+function externalInviteLink(inviteId, inviteCode) {
+  const inviteKey = inviteCode || inviteId || "";
+  if (!inviteKey) return "";
+  const url = new URL(`${window.location.origin}/open`);
+  url.searchParams.set("code", inviteKey);
+  return url.toString();
+}
+
 function statusTone(status) {
   if (status === "앱 수신") return "bg-emerald-50 text-emerald-700";
   if (status === "만료") return "bg-rose-50 text-rose-700";
@@ -734,7 +742,7 @@ export default function App() {
 
       const inviteId = result.inviteId || result.requestId || pendingPass.id;
       const inviteCode = result.inviteCode || result.code || inviteId;
-      const inviteUrl = result.inviteUrl || result.url || result.link || deepLinkFor("", inviteId, inviteCode);
+      const inviteUrl = externalInviteLink(inviteId, inviteCode);
 
       const { history, visitCount, ...newPass } = pendingPass;
       const savedInvite = sanitizeInvite({
@@ -854,7 +862,7 @@ export default function App() {
 
       const inviteId = result.inviteId || result.requestId || result.id || safeUuid();
       const inviteCode = result.inviteCode || result.code || inviteId;
-      const inviteUrl = result.inviteUrl || result.url || deepLinkFor("", inviteId, inviteCode);
+      const inviteUrl = externalInviteLink(inviteId, inviteCode);
 
       const newQrInvite = sanitizeInvite({
         id: inviteId,
@@ -1072,7 +1080,7 @@ export default function App() {
                 {issuedInvite.inviteCode || "-"}
               </div>
               <p className="mt-3 text-xs leading-relaxed text-emerald-800">
-                방문자에게 초대 코드를 직접 전달해 주세요. 전화번호/SMS는 사용하지 않습니다.
+                방문자에게 초대 코드 또는 초대 링크를 직접 전달해 주세요. 초대 링크는 카톡/SMS에서도 열 수 있는 외부 공유용 링크입니다.
               </p>
             </div>
 
@@ -1521,7 +1529,7 @@ export default function App() {
                             <p className="sm:col-span-2">주차권 사용기간: {displayDate(row.ticketValidFrom)} ~ {displayDate(row.ticketValidUntil)}</p>
                             <p className="sm:col-span-2">메모: {row.memo || "-"}</p>
                             <p className="break-all sm:col-span-2">
-                              초대 링크: {row.serverInviteUrl || deepLinkFor(row.phone, row.inviteId || row.id, row.inviteCode)}
+                              초대 링크: {row.serverInviteUrl || externalInviteLink(row.inviteId || row.id, row.inviteCode)}
                             </p>
                           </div>
                         </div>
