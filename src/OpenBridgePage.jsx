@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-// 실제 설치된 앱 패키지명으로 맞춰주세요.
-// 과거 대화 기준 후보: com.bncomm.bluekhanbleflutter
-const ANDROID_PACKAGE = "com.bncomm.bluekhanbleflutter";
+// 외부 공유 링크(카톡/SMS/메일)에서 앱을 여는 브릿지 페이지입니다.
+// Android intent URL에 package를 지정하지 않습니다.
+// 패키지명이 실제 앱과 다르면 Google Play에서 "항목을 찾을 수 없습니다"가 뜰 수 있기 때문입니다.
 const IOS_APP_STORE_URL = "https://apps.apple.com/app/id1234567890";
-const ANDROID_STORE_URL = `https://play.google.com/store/apps/details?id=${ANDROID_PACKAGE}`;
+const ANDROID_STORE_URL = "https://play.google.com/store";
 
 function getQueryParam(name) {
   const url = new URL(window.location.href);
@@ -23,9 +23,9 @@ function buildCustomSchemeUrl(code) {
 }
 
 function buildAndroidIntentUrl(code) {
-  return `intent://invite?code=${encodeURIComponent(
-    code
-  )}#Intent;scheme=bluekhan;package=${ANDROID_PACKAGE};end`;
+  // package를 넣지 않으면 bluekhan scheme을 처리할 수 있는 설치 앱이 직접 열립니다.
+  // QR에서 bluekhan://invite?code=...가 열리는 것과 같은 방식입니다.
+  return `intent://invite?code=${encodeURIComponent(code)}#Intent;scheme=bluekhan;end`;
 }
 
 export default function OpenBridgePage() {
@@ -89,13 +89,13 @@ export default function OpenBridgePage() {
       setStatus("앱을 여는 중입니다...");
 
       if (isAndroid) {
-        // Android에서는 intent URL이 가장 먼저 시도되도록 함
-        window.location.replace(androidIntentUrl);
+        // QR 스캔과 동일하게 custom scheme을 먼저 시도합니다.
+        // 일부 브라우저/메신저에서 막히면 package 없는 intent URL을 한 번 더 시도합니다.
+        window.location.href = appUrl;
 
-        // 일부 브라우저에서는 intent가 무시될 수 있어 custom scheme도 한 번 더 시도
         setTimeout(() => {
           if (!openedRef.current && !document.hidden) {
-            window.location.href = appUrl;
+            window.location.href = androidIntentUrl;
           }
         }, 500);
       } else {
@@ -121,10 +121,10 @@ export default function OpenBridgePage() {
     setStatus("앱을 다시 여는 중입니다...");
 
     if (isAndroid) {
-      window.location.replace(androidIntentUrl);
+      window.location.href = appUrl;
       setTimeout(() => {
         if (!document.hidden) {
-          window.location.href = appUrl;
+          window.location.href = androidIntentUrl;
         }
       }, 500);
     } else {
