@@ -40,7 +40,6 @@ const defaultMerchant = {
   shopName: "A동 201호",
   ownerName: "정태윤",
   phone: "010-1111-2222",
-  address: "수원시 영통구 예시로 123",
   planName: "월 300건",
   monthlyQuota: 300,
   parkingGates: BARRIER_OPTIONS,
@@ -96,7 +95,6 @@ function displayDate(isoString) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
   }).format(d);
 }
 
@@ -247,7 +245,7 @@ function buildInitialForm(defaultGateId = BARRIER_OPTIONS[0].id) {
     ticketValidFrom: nowValue,
     ticketValidUntil: addMinutesToLocalDateTimeValue(nowValue, 60),
     customValidityRange: false,
-    issueMethod: "manual",
+    issueMethod: "sms",
   };
 }
 
@@ -260,8 +258,8 @@ function buildPendingPass({ form, merchant, invites }) {
 
   return {
     id: safeUuid(),
-    visitorName: "방문자",
-    phone: "",
+    visitorName: form.visitorName.trim() || "이름 미입력",
+    phone: form.phone,
     shopName: merchant.shopName,
     parkingGateIds: selectedGateIds,
     parkingGateNames: selectedGateNames,
@@ -271,7 +269,7 @@ function buildPendingPass({ form, merchant, invites }) {
     ticketValidFrom: new Date(form.ticketValidFrom).toISOString(),
     ticketValidUntil: new Date(form.ticketValidUntil).toISOString(),
     usageLimit: Number(form.usageLimit),
-    issueMethod: "manual",
+    issueMethod: form.issueMethod || "sms",
     status: "발행 완료",
     createdAt: nowIso(),
     history,
@@ -415,6 +413,8 @@ export default function App() {
   const [favorites, setFavorites] = useState([]);
   const [favoriteName, setFavoriteName] = useState("");
   const [favoriteModalOpen, setFavoriteModalOpen] = useState(false);
+  const [inviteCodeModalOpen, setInviteCodeModalOpen] = useState(false);
+  const [issuedInvite, setIssuedInvite] = useState(null);
 
   useEffect(() => {
     try {
@@ -636,6 +636,7 @@ export default function App() {
       ticketValidFrom: form.ticketValidFrom,
       ticketValidUntil: form.ticketValidUntil,
       customValidityRange: form.customValidityRange,
+      issueMethod: form.issueMethod || "sms",
       selectedGateIds,
       createdAt: nowIso(),
     };
@@ -655,6 +656,7 @@ export default function App() {
       ticketValidFrom: favorite.ticketValidFrom || prev.ticketValidFrom,
       ticketValidUntil: favorite.ticketValidUntil || prev.ticketValidUntil,
       customValidityRange: favorite.customValidityRange ?? true,
+      issueMethod: favorite.issueMethod || "sms",
       selectedGateIds: validGateIds.length > 0 ? validGateIds : prev.selectedGateIds,
     }));
     setFavoriteModalOpen(false);
@@ -713,12 +715,12 @@ export default function App() {
     if (!pendingPass) return;
 
     setError("");
-    setApiStatus("서버에 주차권 발행 요청 중입니다...");
+    setApiStatus("서버에 초대 코드 발행 요청 중입니다...");
 
     try {
       const result = await requestParkingPass({
         phone: "",
-        visitorName: "방문자",
+        visitorName: pendingPass.visitorName || "초대코드 방문자",
         parkingGateId: pendingPass.parkingGateIds[0],
         parkingGateIds: pendingPass.parkingGateIds,
         parkingGateNames: pendingPass.parkingGateNames,
@@ -736,7 +738,7 @@ export default function App() {
 
       const inviteId = result.inviteId || result.requestId || pendingPass.id;
       const inviteCode = result.inviteCode || "";
-      const inviteUrl = result.inviteUrl || result.url || deepLinkFor(pendingPass.phone, inviteId, inviteCode);
+      const inviteUrl = result.inviteUrl || result.url || deepLinkFor("", inviteId, inviteCode);
 
       const { history, visitCount, ...newPass } = pendingPass;
       const next = [
@@ -746,7 +748,8 @@ export default function App() {
           inviteId,
           inviteCode,
           status: "발행 완료",
-          issueMethod: pendingPass.issueMethod || form.issueMethod || "sms",
+          phone: "초대코드 직접 전달",
+          issueMethod: "manual",
           serverSynced: true,
           serverInviteUrl: inviteUrl,
         }),
@@ -754,20 +757,22 @@ export default function App() {
       ];
 
       persistInvites(next);
-      setPendingPass(
-        sanitizeInvite({
-          ...newPass,
-          id: inviteId,
-          inviteId,
-          inviteCode,
-          status: "발행 완료",
-          issueMethod: "manual",
-          serverSynced: true,
-          serverInviteUrl: inviteUrl,
-        })
-      );
+      setIssuedInvite({
+        inviteId,
+        inviteCode,
+        inviteUrl,
+        parkingGateNames: pendingPass.parkingGateNames,
+        durationMinutes: pendingPass.durationMinutes,
+        usageLimit: pendingPass.usageLimit,
+        ticketValidFrom: pendingPass.ticketValidFrom,
+        ticketValidUntil: pendingPass.ticketValidUntil,
+      });
+      setConfirmModalOpen(false);
+      setPendingPass(null);
+      setInviteCodeModalOpen(true);
       setApiStatus("");
-      setToast("초대 코드가 발행되었습니다. 복사해서 방문자에게 전달해 주세요.");
+      setToast("초대 코드가 발행되었습니다.");
+      resetForm();
     } catch (err) {
       setApiStatus("");
       setError(err?.message || "주차권 발행 중 오류가 발생했습니다.");
@@ -775,28 +780,11 @@ export default function App() {
   }
 
   async function copyLink(invite) {
-    const link = invite.serverInviteUrl || deepLinkFor(invite.phone, invite.inviteId || invite.id, invite.inviteCode);
-
-    try {
-      await navigator.clipboard.writeText(link);
-      setCopiedId(invite.id);
-      setToast("방문자 링크를 복사했습니다.");
-      setTimeout(() => setCopiedId(""), 1500);
-    } catch {
-      setError("클립보드 복사에 실패했습니다.");
-    }
-  }
-
-  async function copyInviteCode(invite) {
-    const code = invite?.inviteCode || invite?.inviteId || invite?.id || "";
-    if (!code) {
-      setError("복사할 초대 코드가 없습니다.");
-      return;
-    }
+    const code = invite.inviteCode || invite.inviteId || invite.id || "";
 
     try {
       await navigator.clipboard.writeText(code);
-      setCopiedId(invite.id || code);
+      setCopiedId(invite.id);
       setToast("초대 코드를 복사했습니다.");
       setTimeout(() => setCopiedId(""), 1500);
     } catch {
@@ -936,6 +924,8 @@ export default function App() {
     setQrTicketUsed(false);
     setQrModalOpen(false);
     setFavoriteModalOpen(false);
+    setInviteCodeModalOpen(false);
+    setIssuedInvite(null);
     resetForm();
     setShowHistoryPanel(false);
     setToast("데모 데이터를 초기화했습니다.");
@@ -985,7 +975,7 @@ export default function App() {
       <header className="sticky top-0 z-20 border-b bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div>
-            <p className="text-sm text-slate-500">방문자 주차권 시스템</p>
+            <p className="text-sm text-slate-500">상가 주인용 방문자 주차권 관리</p>
             <h1 className="text-xl font-bold sm:text-2xl">{merchant.shopName} 주차 방문 관리</h1>
           </div>
 
@@ -1014,7 +1004,7 @@ export default function App() {
 
       <Modal
         open={confirmModalOpen}
-        title="주차권 발행 확인"
+        title="초대 코드 발행 확인"
         onClose={() => {
           setConfirmModalOpen(false);
           setPendingPass(null);
@@ -1023,6 +1013,9 @@ export default function App() {
         {pendingPass ? (
           <div className="space-y-5">
             <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2">
+              <p>
+                <span className="font-medium text-slate-700">방문자명:</span> {pendingPass.visitorName}
+              </p>
               <p className="sm:col-span-2">
                 <span className="font-medium text-slate-700">대상 차단기:</span> {pendingPass.parkingGateNames.join(", ")}
               </p>
@@ -1037,23 +1030,6 @@ export default function App() {
               </p>
             </div>
 
-            {pendingPass.serverSynced ? (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                <p className="text-sm font-semibold text-emerald-900">발행된 초대 코드</p>
-                <div className="mt-3 rounded-xl bg-white px-4 py-3 text-center text-2xl font-black tracking-[0.25em] text-slate-900 ring-1 ring-emerald-100">
-                  {pendingPass.inviteCode || pendingPass.inviteId || pendingPass.id}
-                </div>
-                <p className="mt-2 text-xs leading-relaxed text-emerald-800">
-                  SMS는 발송하지 않습니다. 위 초대 코드를 복사하여 방문자에게 개별 전달해 주세요.
-                </p>
-                {pendingPass.serverInviteUrl ? (
-                  <div className="mt-3 break-all rounded-xl bg-white px-3 py-2 text-xs text-slate-600 ring-1 ring-emerald-100">
-                    {pendingPass.serverInviteUrl}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
             <div className="rounded-2xl border p-4">
               <div className="flex items-center justify-between gap-3">
                 <h4 className="text-base font-semibold">방문 이력 확인</h4>
@@ -1064,7 +1040,7 @@ export default function App() {
 
               {pendingPass.history.length === 0 ? (
                 <p className="mt-3 text-sm text-slate-500">
-                  등록된 방문 이력이 없습니다.
+                  해당 전화번호로 등록된 방문 이력이 없습니다. 이번이 첫 방문입니다.
                 </p>
               ) : (
                 <div className="mt-3 space-y-3">
@@ -1086,55 +1062,94 @@ export default function App() {
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-              {pendingPass.serverSynced ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => copyInviteCode(pendingPass)}
-                    className="rounded-lg bg-slate-900 px-3 py-2 text-[13px] font-semibold text-white shadow-sm hover:opacity-90"
-                  >
-                    {copiedId === pendingPass.id ? "복사됨" : "초대 코드 복사"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => copyLink(pendingPass)}
-                    className="rounded-lg border px-3 py-2 text-[13px] font-semibold hover:bg-slate-50"
-                  >
-                    초대 링크 복사
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setConfirmModalOpen(false);
-                      setPendingPass(null);
-                      resetForm();
-                    }}
-                    className="rounded-lg border px-3 py-2 text-[13px] font-semibold hover:bg-slate-50"
-                  >
-                    닫기
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setConfirmModalOpen(false);
-                      setPendingPass(null);
-                    }}
-                    className="rounded-lg border px-2.5 py-1.5 text-[12px] font-medium hover:bg-slate-50"
-                  >
-                    취소
-                  </button>
-                  <button
-                    type="button"
-                    onClick={confirmIssuePass}
-                    className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[12px] font-medium text-white shadow-sm hover:opacity-90"
-                  >
-                    확인 후 초대 코드 발행
-                  </button>
-                </>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmModalOpen(false);
+                  setPendingPass(null);
+                }}
+                className="rounded-lg border px-2.5 py-1.5 text-[12px] font-medium hover:bg-slate-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={confirmIssuePass}
+                className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[12px] font-medium text-white shadow-sm hover:opacity-90"
+              >
+                확인 후 초대코드 발행
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={inviteCodeModalOpen}
+        title="초대 코드 발행 완료"
+        onClose={() => setInviteCodeModalOpen(false)}
+      >
+        {issuedInvite ? (
+          <div className="space-y-5">
+            <div className="rounded-2xl border bg-slate-50 p-5 text-center">
+              <p className="text-sm font-medium text-slate-600">방문자에게 아래 초대 코드를 전달해 주세요.</p>
+              <div className="mt-3 rounded-2xl bg-white px-4 py-5 text-3xl font-black tracking-widest text-slate-900 ring-1 ring-slate-200">
+                {issuedInvite.inviteCode || "-"}
+              </div>
+              <p className="mt-3 text-xs leading-relaxed text-slate-500">
+                전화번호/SMS는 사용하지 않습니다. 사용자가 초대 코드 또는 링크를 직접 복사해 방문자에게 전달하는 방식입니다.
+              </p>
+            </div>
+
+            <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2">
+              <p className="sm:col-span-2"><span className="font-medium text-slate-700">대상 차단기:</span> {issuedInvite.parkingGateNames?.join(", ") || "-"}</p>
+              <p><span className="font-medium text-slate-700">유효시간:</span> {displayDuration(issuedInvite.durationMinutes)}</p>
+              <p><span className="font-medium text-slate-700">사용 가능 횟수:</span> {issuedInvite.usageLimit}회</p>
+              <p className="sm:col-span-2"><span className="font-medium text-slate-700">주차권 사용기간:</span> {displayDate(issuedInvite.ticketValidFrom)} ~ {displayDate(issuedInvite.ticketValidUntil)}</p>
+            </div>
+
+            {issuedInvite.inviteUrl ? (
+              <div className="rounded-2xl border bg-white p-3 text-xs break-all text-slate-600">
+                {issuedInvite.inviteUrl}
+              </div>
+            ) : null}
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(issuedInvite.inviteCode || "");
+                    setToast("초대 코드를 복사했습니다.");
+                  } catch {
+                    setError("초대 코드 복사에 실패했습니다.");
+                  }
+                }}
+                className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50"
+              >
+                초대 코드 복사
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(issuedInvite.inviteUrl || issuedInvite.inviteCode || "");
+                    setToast("초대 링크를 복사했습니다.");
+                  } catch {
+                    setError("초대 링크 복사에 실패했습니다.");
+                  }
+                }}
+                className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50"
+              >
+                초대 링크 복사
+              </button>
+              <button
+                type="button"
+                onClick={() => setInviteCodeModalOpen(false)}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90"
+              >
+                닫기
+              </button>
             </div>
           </div>
         ) : null}
@@ -1239,7 +1254,7 @@ export default function App() {
           <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-3">
             <p className="text-sm font-semibold text-amber-950">현재 입력된 조건 저장</p>
             <p className="mt-1 text-xs leading-relaxed text-amber-800">
-              유효시간, 사용 횟수, 시작/종료 시간, 대상 차단기를 저장합니다.
+              유효시간, 사용 횟수, 시작/종료 시간, 발행 방식, 대상 차단기를 저장합니다.
             </p>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               <input
@@ -1277,7 +1292,7 @@ export default function App() {
                       <div className="min-w-0">
                         <p className="font-semibold text-slate-900">{favorite.name}</p>
                         <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                          유효시간 {displayDuration(favorite.durationMinutes)} · {favorite.usageLimit}회
+                          유효시간 {displayDuration(favorite.durationMinutes)} · {favorite.usageLimit}회 · {favorite.issueMethod === "qr" ? "QR Code" : "SMS 링크"}
                         </p>
                         <p className="mt-1 text-xs leading-relaxed text-slate-500">
                           사용기간 {displayDate(favorite.ticketValidFrom)} ~ {displayDate(favorite.ticketValidUntil)}
@@ -1334,6 +1349,30 @@ export default function App() {
             <div className="grid grid-cols-2 gap-1.5">
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1">
                 <div className="flex items-center gap-1.5">
+                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">이름</label>
+                  <input
+                    value={form.visitorName}
+                    onChange={(e) => handleChange("visitorName", e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none transition focus:border-slate-400"
+                    placeholder="김민수"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1">
+                <div className="flex items-center gap-1.5">
+                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">전화</label>
+                  <input
+                    value={form.phone}
+                    onChange={(e) => handleChange("phone", e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none transition focus:border-slate-400"
+                    placeholder="010-0000-0000"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1">
+                <div className="flex items-center gap-1.5">
                   <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">유효</label>
                   <select
                     value={form.durationMinutes}
@@ -1361,6 +1400,23 @@ export default function App() {
                     className="min-w-0 w-14 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none focus:border-slate-400"
                   />
                   <span className="truncate text-[10px] text-slate-500">/{remainingPasses}</span>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 col-span-2">
+                <div className="flex items-center gap-1.5">
+                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">방식</label>
+                  <select
+                    value={form.issueMethod}
+                    onChange={(e) => handleChange("issueMethod", e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none focus:border-slate-400"
+                  >
+                    {ISSUE_METHOD_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -1549,10 +1605,12 @@ export default function App() {
                           </div>
 
                           <div className="grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+                            <p>전화번호: {row.phone}</p>
                             <p>상가: {row.shopName}</p>
                             <p>대상 차단기: {row.parkingGateNames.join(", ")}</p>
                             <p>유효시간: {displayDuration(row.durationMinutes)}</p>
                             <p>사용 가능 횟수: {row.usageLimit}회</p>
+                            <p>발행 방식: {row.issueMethod === "qr" ? "QR Code" : "SMS 링크"}</p>
                             <p>생성 시각: {displayDate(row.createdAt)}</p>
                             <p className="sm:col-span-2">주차권 사용기간: {displayDate(row.ticketValidFrom)} ~ {displayDate(row.ticketValidUntil)}</p>
                             <p className="sm:col-span-2">메모: {row.memo || "-"}</p>
@@ -1565,7 +1623,7 @@ export default function App() {
                         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[360px]">
                           <button
                             type="button"
-                            onClick={() => copyInviteCode(row)}
+                            onClick={() => copyLink(row)}
                             className="rounded-2xl border px-3 py-2 text-sm font-medium hover:bg-slate-50"
                           >
                             {copiedId === row.id ? "복사됨" : "초대 코드 복사"}
@@ -1613,9 +1671,9 @@ export default function App() {
                 <span className="text-slate-500">대표자</span>
                 <span className="font-medium">{merchant.ownerName}</span>
               </div>
-              <div className="flex justify-between gap-3">
-                <span className="shrink-0 text-slate-500">주소</span>
-                <span className="text-right font-medium">{merchant.address || "주소 미등록"}</span>
+              <div className="flex justify-between">
+                <span className="text-slate-500">연락처</span>
+                <span className="font-medium">{merchant.phone}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">요금제</span>
