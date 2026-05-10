@@ -734,7 +734,7 @@ export default function App() {
 
       const inviteId = result.inviteId || result.requestId || pendingPass.id;
       const inviteCode = result.inviteCode || result.code || inviteId;
-      const inviteUrl = result.inviteUrl || result.url || result.link || deepLinkFor("", inviteId, inviteCode);
+      const inviteUrl = deepLinkFor("", inviteId, inviteCode);
 
       const { history, visitCount, ...newPass } = pendingPass;
       const savedInvite = sanitizeInvite({
@@ -791,7 +791,7 @@ export default function App() {
   }
 
   async function copyIssuedInviteLink() {
-    const value = issuedInvite?.inviteUrl || issuedInvite?.serverInviteUrl || issuedInvite?.inviteCode || "";
+    const value = issuedInvite?.inviteCode ? deepLinkFor("", issuedInvite.inviteId || issuedInvite.id, issuedInvite.inviteCode) : "";
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
@@ -834,7 +834,7 @@ export default function App() {
 
       const inviteId = result.inviteId || result.requestId || safeUuid();
       const inviteCode = result.inviteCode || result.code || inviteId;
-      const inviteUrl = result.inviteUrl || result.url || result.link || deepLinkFor("", inviteId, inviteCode);
+      const inviteUrl = deepLinkFor("", inviteId, inviteCode);
 
       const newInvite = sanitizeInvite({
         ...issuedInvite,
@@ -917,7 +917,7 @@ export default function App() {
 
       const inviteId = result.inviteId || result.requestId || result.id || safeUuid();
       const inviteCode = result.inviteCode || result.code || inviteId;
-      const inviteUrl = result.inviteUrl || result.url || deepLinkFor("", inviteId, inviteCode);
+      const inviteUrl = deepLinkFor("", inviteId, inviteCode);
 
       const newQrInvite = sanitizeInvite({
         id: inviteId,
@@ -1593,7 +1593,7 @@ export default function App() {
                             <p className="sm:col-span-2">주차권 사용기간: {displayDate(row.ticketValidFrom)} ~ {displayDate(row.ticketValidUntil)}</p>
                             <p className="sm:col-span-2">메모: {row.memo || "-"}</p>
                             <p className="break-all sm:col-span-2">
-                              초대 링크: {row.serverInviteUrl || deepLinkFor(row.phone, row.inviteId || row.id, row.inviteCode)}
+                              초대 링크: {deepLinkFor("", row.inviteId || row.id, row.inviteCode)}
                             </p>
                           </div>
                         </div>
