@@ -117,7 +117,9 @@ function isValidPhone(value) {
 
 function deepLinkFor(phone, inviteId, inviteCode) {
   const inviteKey = inviteCode || inviteId || "";
-  const url = new URL(`${window.location.origin}/open`);
+  // 외부 공유용 링크는 카톡/SMS/메일에서 안정적으로 열리도록 HTTPS 루트 링크를 사용합니다.
+  // App()에서 ?code 파라미터를 감지하면 OpenBridgePage를 렌더링하여 앱을 실행합니다.
+  const url = new URL(window.location.origin);
   url.searchParams.set("code", inviteKey);
   return url.toString();
 }
@@ -387,8 +389,14 @@ function Modal({ open, title, onClose, children }) {
 
 export default function App() {
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+  const searchCode =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("code")
+      : "";
 
-  if (pathname === "/open") {
+  // /open?code=... 또는 /?code=... 로 들어오면 메인 관리 화면이 아니라
+  // 앱 실행 브릿지 화면을 바로 보여줍니다.
+  if (pathname === "/open" || searchCode) {
     return <OpenBridgePage />;
   }
 
