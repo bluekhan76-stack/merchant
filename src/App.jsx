@@ -920,23 +920,27 @@ export default function App() {
   }
 
   function resetDemoData() {
-    const seed = makeSeedInvites();
     localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(defaultMerchant));
-    localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(seed));
+    localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify([]));
     localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify([]));
+
     setMerchant(defaultMerchant);
-    setInvites(seed);
+    setInvites([]);
     setFavorites([]);
+
     setPendingPass(null);
     setConfirmModalOpen(false);
+
     setQrTicket(null);
     setQrTicketUsed(false);
     setQrModalOpen(false);
+
     setFavoriteModalOpen(false);
     setIssuedInvite(null);
-    setInviteResultModalOpen(false);
+
     resetForm();
     setShowHistoryPanel(false);
+
     setToast("데모 데이터를 초기화했습니다.");
   }
 
