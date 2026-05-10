@@ -1032,37 +1032,6 @@ export default function App() {
               </p>
             </div>
 
-            <div className="rounded-2xl border p-4">
-              <div className="flex items-center justify-between gap-3">
-                <h4 className="text-base font-semibold">방문 이력 확인</h4>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                  총 방문 {pendingPass.visitCount}회
-                </span>
-              </div>
-
-              {pendingPass.history.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">
-                  등록된 방문 이력이 없습니다.
-                </p>
-              ) : (
-                <div className="mt-3 space-y-3">
-                  {pendingPass.history.slice(0, 5).map((item) => (
-                    <div key={item.id} className="rounded-2xl bg-slate-50 p-3 text-sm">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">{displayDate(item.createdAt)}</span>
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusTone(item.status)}`}>
-                          {item.status}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-slate-600">차단기: {item.parkingGateNames.join(", ")}</p>
-                      <p className="text-slate-600">사용 가능 횟수: {item.usageLimit}회</p>
-                      <p className="text-slate-600">메모: {item.memo || "-"}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
             <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
