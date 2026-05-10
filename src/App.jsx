@@ -117,11 +117,7 @@ function isValidPhone(value) {
 
 function deepLinkFor(phone, inviteId, inviteCode) {
   const inviteKey = inviteCode || inviteId || "";
-  // KakaoTalk/SMS/email에서 custom scheme(bluekhan://)를 직접 열면 차단될 수 있습니다.
-  // 따라서 외부 공유용 링크는 항상 현재 웹 도메인의 루트 경로 + code 파라미터로 만듭니다.
-  // 예: https://your-domain.amplifyapp.com/?code=ABC123
-  // 이 링크를 열면 App이 OpenBridgePage를 렌더링하고, OpenBridgePage가 앱을 실행합니다.
-  const url = new URL(window.location.origin);
+  const url = new URL(`${window.location.origin}/open`);
   url.searchParams.set("code", inviteKey);
   return url.toString();
 }
@@ -391,13 +387,8 @@ function Modal({ open, title, onClose, children }) {
 
 export default function App() {
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
-  const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  const inviteCodeFromUrl = searchParams?.get("code") || "";
 
-  // /open?code=... 뿐 아니라 /?code=... 도 앱 실행 브릿지 화면으로 처리합니다.
-  // Amplify rewrite 설정이 누락되어 /open 경로가 404가 나는 경우를 피하기 위해
-  // 외부 공유 링크는 /?code=... 형태를 기본으로 사용합니다.
-  if (pathname === "/open" || inviteCodeFromUrl) {
+  if (pathname === "/open") {
     return <OpenBridgePage />;
   }
 
@@ -743,7 +734,7 @@ export default function App() {
 
       const inviteId = result.inviteId || result.requestId || pendingPass.id;
       const inviteCode = result.inviteCode || result.code || inviteId;
-      const inviteUrl = deepLinkFor("", inviteId, inviteCode);
+      const inviteUrl = result.inviteUrl || result.url || result.link || deepLinkFor("", inviteId, inviteCode);
 
       const { history, visitCount, ...newPass } = pendingPass;
       const savedInvite = sanitizeInvite({
@@ -810,6 +801,69 @@ export default function App() {
     }
   }
 
+  async function issueAnotherInviteFromLast() {
+    if (!issuedInvite) return;
+
+    setError("");
+    setApiStatus("서버에 새 초대 코드 발행 요청 중입니다...");
+
+    try {
+      const parkingGateIds = normalizeGateIds(issuedInvite.parkingGateIds);
+      const parkingGateNames =
+        Array.isArray(issuedInvite.parkingGateNames) && issuedInvite.parkingGateNames.length > 0
+          ? issuedInvite.parkingGateNames
+          : gateNamesFromIds(parkingGateIds, merchant.parkingGates);
+
+      const result = await requestParkingPass({
+        phone: "",
+        visitorName: "초대코드 방문자",
+        parkingGateId: parkingGateIds[0],
+        parkingGateIds,
+        parkingGateNames,
+        validMinutes: Number(issuedInvite.durationMinutes || 60),
+        memo: issuedInvite.memo || "",
+        usageLimit: Number(issuedInvite.usageLimit || 1),
+        ticketValidFrom: issuedInvite.ticketValidFrom,
+        ticketValidUntil: issuedInvite.ticketValidUntil,
+        issueMethod: "manual",
+        deliveryMethod: "manual",
+        merchantShopName: merchant.shopName,
+        merchantOwnerName: merchant.ownerName,
+        merchantPhone: merchant.phone,
+      });
+
+      const inviteId = result.inviteId || result.requestId || safeUuid();
+      const inviteCode = result.inviteCode || result.code || inviteId;
+      const inviteUrl = result.inviteUrl || result.url || result.link || deepLinkFor("", inviteId, inviteCode);
+
+      const newInvite = sanitizeInvite({
+        ...issuedInvite,
+        id: inviteId,
+        inviteId,
+        inviteCode,
+        status: "발행 완료",
+        phone: "초대코드 직접 전달",
+        visitorName: "초대코드 방문자",
+        issueMethod: "manual",
+        createdAt: nowIso(),
+        serverSynced: true,
+        serverInviteUrl: inviteUrl,
+        usedAt: "",
+      });
+
+      persistInvites([newInvite, ...invites]);
+      setIssuedInvite({
+        ...newInvite,
+        inviteUrl,
+      });
+      setApiStatus("");
+      setToast("새 초대 코드가 발행되었습니다.");
+    } catch (err) {
+      setApiStatus("");
+      setError(err?.message || "새 초대 코드 발행 중 오류가 발생했습니다.");
+    }
+  }
+
 
   async function handleIssueQrPass() {
     setError("");
@@ -863,7 +917,7 @@ export default function App() {
 
       const inviteId = result.inviteId || result.requestId || result.id || safeUuid();
       const inviteCode = result.inviteCode || result.code || inviteId;
-      const inviteUrl = deepLinkFor("", inviteId, inviteCode);
+      const inviteUrl = result.inviteUrl || result.url || deepLinkFor("", inviteId, inviteCode);
 
       const newQrInvite = sanitizeInvite({
         id: inviteId,
@@ -1101,6 +1155,15 @@ export default function App() {
                 초대 링크 복사
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={issueAnotherInviteFromLast}
+              disabled={Boolean(apiStatus)}
+              className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {apiStatus ? "새 초대 코드 발행 중..." : "같은 조건으로 새 초대 코드 발행"}
+            </button>
 
             <button
               type="button"
