@@ -412,6 +412,7 @@ export default function App() {
   const [qrBusy, setQrBusy] = useState(false);
   const [favorites, setFavorites] = useState([]);
   const [favoriteName, setFavoriteName] = useState("");
+  const [favoriteModalOpen, setFavoriteModalOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -656,6 +657,7 @@ export default function App() {
       issueMethod: favorite.issueMethod || "sms",
       selectedGateIds: validGateIds.length > 0 ? validGateIds : prev.selectedGateIds,
     }));
+    setFavoriteModalOpen(false);
     setToast(`${favorite.name} 조건을 불러왔습니다.`);
   }
 
@@ -912,6 +914,7 @@ export default function App() {
     setQrTicket(null);
     setQrTicketUsed(false);
     setQrModalOpen(false);
+    setFavoriteModalOpen(false);
     resetForm();
     setShowHistoryPanel(false);
     setToast("데모 데이터를 초기화했습니다.");
@@ -931,6 +934,10 @@ export default function App() {
     {
       label: "문자 재발송 안내",
       action: () => setToast("발행 내역 카드에서 재발송 버튼으로 테스트할 수 있습니다."),
+    },
+    {
+      label: "즐겨찾기",
+      action: () => setFavoriteModalOpen(true),
     },
     {
       label: "방문자 이력 확인하기",
@@ -1159,6 +1166,91 @@ export default function App() {
         ) : null}
       </Modal>
 
+      <Modal
+        open={favoriteModalOpen}
+        title="즐겨찾기 발행 조건"
+        onClose={() => setFavoriteModalOpen(false)}
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-3">
+            <p className="text-sm font-semibold text-amber-950">현재 입력된 조건 저장</p>
+            <p className="mt-1 text-xs leading-relaxed text-amber-800">
+              유효시간, 사용 횟수, 시작/종료 시간, 발행 방식, 대상 차단기를 저장합니다.
+            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <input
+                value={favoriteName}
+                onChange={(e) => setFavoriteName(e.target.value)}
+                className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-amber-400"
+                placeholder="예: 1시간 1회 QR"
+              />
+              <button
+                type="button"
+                onClick={saveCurrentAsFavorite}
+                className="rounded-xl bg-amber-900 px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+              >
+                현재 조건 저장
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">저장된 즐겨찾기</p>
+                <p className="text-xs text-slate-500">불러오기를 누르면 발행 화면에 조건이 바로 적용됩니다.</p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                {favorites.length}개
+              </span>
+            </div>
+
+            {favorites.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {favorites.map((favorite) => (
+                  <div key={favorite.id} className="rounded-2xl border p-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-900">{favorite.name}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                          유효시간 {displayDuration(favorite.durationMinutes)} · {favorite.usageLimit}회 · {favorite.issueMethod === "qr" ? "QR Code" : "SMS 링크"}
+                        </p>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                          사용기간 {displayDate(favorite.ticketValidFrom)} ~ {displayDate(favorite.ticketValidUntil)}
+                        </p>
+                        <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                          차단기 {gateNamesFromIds(favorite.selectedGateIds, merchant.parkingGates).join(", ") || "기본 차단기"}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => applyFavorite(favorite)}
+                          className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:opacity-90"
+                        >
+                          불러오기
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeFavorite(favorite.id)}
+                          className="rounded-xl border px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50"
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-3 rounded-2xl border border-dashed px-4 py-8 text-center text-sm text-slate-500">
+                저장된 즐겨찾기가 없습니다. 현재 조건을 입력한 뒤 저장해 주세요.
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
       <main className="mx-auto grid max-w-7xl gap-3 px-3 py-3 sm:px-4 lg:grid-cols-12 lg:px-6">
         <section className="space-y-3 lg:col-span-8">
           <form onSubmit={handleOpenConfirm} className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
@@ -1173,46 +1265,6 @@ export default function App() {
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
                 잔여 주차권 {remainingPasses}건
               </span>
-            </div>
-
-            <div className="mb-3 rounded-2xl border border-amber-100 bg-amber-50/60 p-2">
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-[12px] font-semibold text-amber-900">자주 쓰는 발행 조건</p>
-                  <p className="text-[10px] text-amber-800">유효시간, 횟수, 시작/종료 시간, 발행 방식을 저장하고 다시 불러옵니다.</p>
-                </div>
-                <div className="flex gap-1.5">
-                  <input
-                    value={favoriteName}
-                    onChange={(e) => setFavoriteName(e.target.value)}
-                    className="min-w-0 rounded-md border bg-white px-2 py-1 text-[12px] outline-none focus:border-amber-400"
-                    placeholder="예: 1시간 1회 QR"
-                  />
-                  <button
-                    type="button"
-                    onClick={saveCurrentAsFavorite}
-                    className="shrink-0 rounded-md bg-amber-900 px-2.5 py-1 text-[12px] font-semibold text-white hover:opacity-90"
-                  >
-                    저장
-                  </button>
-                </div>
-              </div>
-
-              {favorites.length > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {favorites.map((favorite) => (
-                    <div key={favorite.id} className="flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] ring-1 ring-amber-200">
-                      <button type="button" onClick={() => applyFavorite(favorite)} className="font-semibold text-amber-950 hover:underline">
-                        {favorite.name}
-                      </button>
-                      <span className="text-amber-700">{displayDuration(favorite.durationMinutes)} · {favorite.usageLimit}회 · {favorite.issueMethod === "qr" ? "QR" : "SMS"}</span>
-                      <button type="button" onClick={() => removeFavorite(favorite.id)} className="ml-1 text-amber-700 hover:text-rose-600">
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
             </div>
 
             <div className="grid grid-cols-2 gap-1.5">

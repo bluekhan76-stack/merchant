@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import OpenBridgePage from "./OpenBridgePage.jsx";
 
 const STORAGE_KEYS = {
   merchant: "merchant_owner_demo_profile",
   invites: "merchant_owner_demo_invites",
+  favorites: "merchant_owner_demo_favorites",
 };
 
 const API_BASE_URL =
@@ -18,6 +20,11 @@ const BARRIER_OPTIONS = [
   { id: "gate-2", name: "차단기 2" },
   { id: "gate-3", name: "차단기 3" },
   { id: "gate-4", name: "차단기 4" },
+];
+
+const ISSUE_METHOD_OPTIONS = [
+  { value: "sms", label: "SMS 링크" },
+  { value: "qr", label: "QR Code" },
 ];
 
 const DURATION_OPTIONS = [
@@ -112,19 +119,16 @@ function isValidPhone(value) {
 
 function deepLinkFor(phone, inviteId, inviteCode) {
   const inviteKey = inviteCode || inviteId || "";
-  if (API_BASE_URL.includes("REPLACE_WITH_YOUR_API_ID")) {
-    const url = new URL("https://parking.example.com/invite");
-    url.searchParams.set("claim", inviteId || "");
-    url.searchParams.set("phone", phone.replace(/\D/g, ""));
-    return url.toString();
-  }
-  return `${API_BASE_URL}/i/${inviteKey}`;
+  const url = new URL(`${window.location.origin}/open`);
+  url.searchParams.set("code", inviteKey);
+  return url.toString();
 }
 
 function statusTone(status) {
   if (status === "앱 수신") return "bg-emerald-50 text-emerald-700";
   if (status === "만료") return "bg-rose-50 text-rose-700";
   if (status === "재발송") return "bg-amber-50 text-amber-700";
+  if (status === "사용 완료") return "bg-blue-50 text-blue-700";
   if (status === "취소") return "bg-slate-200 text-slate-700";
   return "bg-slate-100 text-slate-700";
 }
@@ -171,6 +175,8 @@ function sanitizeInvite(item) {
     createdAt: item?.createdAt || nowIso(),
     serverSynced: item?.serverSynced ?? false,
     serverInviteUrl: item?.serverInviteUrl || "",
+    issueMethod: item?.issueMethod || item?.deliveryMethod || (item?.phone === "QR 스캔 발급" ? "qr" : "sms"),
+    usedAt: item?.usedAt || "",
   };
 }
 
@@ -239,6 +245,7 @@ function buildInitialForm(defaultGateId = BARRIER_OPTIONS[0].id) {
     ticketValidFrom: nowValue,
     ticketValidUntil: addMinutesToLocalDateTimeValue(nowValue, 60),
     customValidityRange: false,
+    issueMethod: "sms",
   };
 }
 
@@ -262,6 +269,7 @@ function buildPendingPass({ form, merchant, invites }) {
     ticketValidFrom: new Date(form.ticketValidFrom).toISOString(),
     ticketValidUntil: new Date(form.ticketValidUntil).toISOString(),
     usageLimit: Number(form.usageLimit),
+    issueMethod: form.issueMethod || "sms",
     status: "발행 완료",
     createdAt: nowIso(),
     history,
@@ -273,26 +281,41 @@ async function requestParkingPass({
   phone,
   visitorName,
   parkingGateId,
+  parkingGateIds,
+  parkingGateNames,
   validMinutes,
   memo,
   usageLimit,
   ticketValidFrom,
   ticketValidUntil,
+  issueMethod,
+  deliveryMethod,
+  merchantShopName,
+  merchantOwnerName,
+  merchantPhone,
 }) {
+  const normalizedPhone = String(phone || "").replace(/\D/g, "");
   const response = await fetch(`${API_BASE_URL}${API_PATHS.requestPass}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      phone: phone.replace(/\D/g, ""),
+      phone: normalizedPhone,
       visitorName: visitorName || "",
       parkingGateId,
+      parkingGateIds: Array.isArray(parkingGateIds) ? parkingGateIds : undefined,
+      parkingGateNames: Array.isArray(parkingGateNames) ? parkingGateNames : undefined,
       validMinutes,
       memo: memo || "",
       usageLimit,
       ticketValidFrom,
       ticketValidUntil,
+      issueMethod: issueMethod || undefined,
+      deliveryMethod: deliveryMethod || undefined,
+      merchantShopName: merchantShopName || undefined,
+      merchantOwnerName: merchantOwnerName || undefined,
+      merchantPhone: merchantPhone || undefined,
     }),
   });
 
@@ -308,6 +331,36 @@ async function requestParkingPass({
   }
 
   return data || {};
+}
+
+async function requestQrParkingPass({
+  visitorName,
+  parkingGateIds,
+  parkingGateNames,
+  validMinutes,
+  memo,
+  usageLimit,
+  ticketValidFrom,
+  ticketValidUntil,
+  merchant,
+}) {
+  return requestParkingPass({
+    phone: "",
+    visitorName: visitorName || "QR 방문자",
+    parkingGateId: parkingGateIds[0],
+    parkingGateIds,
+    parkingGateNames,
+    validMinutes,
+    memo: memo || "",
+    usageLimit,
+    ticketValidFrom,
+    ticketValidUntil,
+    issueMethod: "qr",
+    deliveryMethod: "qr",
+    merchantShopName: merchant?.shopName || "",
+    merchantOwnerName: merchant?.ownerName || "",
+    merchantPhone: merchant?.phone || "",
+  });
 }
 
 function Modal({ open, title, onClose, children }) {
@@ -335,6 +388,12 @@ function Modal({ open, title, onClose, children }) {
 }
 
 export default function App() {
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+
+  if (pathname === "/open") {
+    return <OpenBridgePage />;
+  }
+
   const [merchant, setMerchant] = useState(defaultMerchant);
   const [invites, setInvites] = useState([]);
   const [form, setForm] = useState(buildInitialForm(defaultMerchant.parkingGates[0].id));
@@ -345,7 +404,14 @@ export default function App() {
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [pendingPass, setPendingPass] = useState(null);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+  const [barrierSectionOpen, setBarrierSectionOpen] = useState(false);
   const [apiStatus, setApiStatus] = useState("");
+  const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [qrTicket, setQrTicket] = useState(null);
+  const [qrTicketUsed, setQrTicketUsed] = useState(false);
+  const [qrBusy, setQrBusy] = useState(false);
+  const [favorites, setFavorites] = useState([]);
+  const [favoriteName, setFavoriteName] = useState("");
 
   useEffect(() => {
     try {
@@ -390,12 +456,20 @@ export default function App() {
         setInvites(seed);
         localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(seed));
       }
+
+      const savedFavorites = localStorage.getItem(STORAGE_KEYS.favorites);
+      if (savedFavorites) {
+        const parsedFavorites = JSON.parse(savedFavorites);
+        setFavorites(Array.isArray(parsedFavorites) ? parsedFavorites : []);
+      }
     } catch {
       const seed = makeSeedInvites();
       setMerchant(defaultMerchant);
       setInvites(seed);
       localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(defaultMerchant));
       localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(seed));
+      setFavorites([]);
+      localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify([]));
     }
   }, []);
 
@@ -543,6 +617,53 @@ export default function App() {
     }));
   }
 
+  function persistFavorites(nextFavorites) {
+    setFavorites(nextFavorites);
+    localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify(nextFavorites));
+  }
+
+  function saveCurrentAsFavorite() {
+    const name = favoriteName.trim() || `즐겨찾기 ${favorites.length + 1}`;
+    const selectedGateIds = normalizeGateIds(form.selectedGateIds);
+    const nextFavorite = {
+      id: safeUuid(),
+      name,
+      durationMinutes: form.durationMinutes,
+      usageLimit: form.usageLimit,
+      ticketValidFrom: form.ticketValidFrom,
+      ticketValidUntil: form.ticketValidUntil,
+      customValidityRange: form.customValidityRange,
+      issueMethod: form.issueMethod || "sms",
+      selectedGateIds,
+      createdAt: nowIso(),
+    };
+    persistFavorites([nextFavorite, ...favorites].slice(0, 8));
+    setFavoriteName("");
+    setToast("현재 발행 조건을 즐겨찾기에 저장했습니다.");
+  }
+
+  function applyFavorite(favorite) {
+    const validGateIds = normalizeGateIds(favorite.selectedGateIds).filter((id) =>
+      merchant.parkingGates.some((gate) => gate.id === id)
+    );
+    setForm((prev) => ({
+      ...prev,
+      durationMinutes: String(favorite.durationMinutes || "60"),
+      usageLimit: String(Math.min(Math.max(Number(favorite.usageLimit || 1), 1), Math.max(remainingPasses, 1))),
+      ticketValidFrom: favorite.ticketValidFrom || prev.ticketValidFrom,
+      ticketValidUntil: favorite.ticketValidUntil || prev.ticketValidUntil,
+      customValidityRange: favorite.customValidityRange ?? true,
+      issueMethod: favorite.issueMethod || "sms",
+      selectedGateIds: validGateIds.length > 0 ? validGateIds : prev.selectedGateIds,
+    }));
+    setToast(`${favorite.name} 조건을 불러왔습니다.`);
+  }
+
+  function removeFavorite(favoriteId) {
+    persistFavorites(favorites.filter((item) => item.id !== favoriteId));
+    setToast("즐겨찾기를 삭제했습니다.");
+  }
+
   function resetForm() {
     setForm(buildInitialForm(merchant.parkingGates?.[0]?.id || defaultMerchant.parkingGates[0].id));
     setError("");
@@ -602,16 +723,23 @@ export default function App() {
         phone: pendingPass.phone,
         visitorName: pendingPass.visitorName,
         parkingGateId: pendingPass.parkingGateIds[0],
+        parkingGateIds: pendingPass.parkingGateIds,
+        parkingGateNames: pendingPass.parkingGateNames,
         validMinutes: pendingPass.durationMinutes,
         memo: pendingPass.memo,
         usageLimit: pendingPass.usageLimit,
         ticketValidFrom: pendingPass.ticketValidFrom,
         ticketValidUntil: pendingPass.ticketValidUntil,
+        issueMethod: pendingPass.issueMethod || form.issueMethod || "sms",
+        deliveryMethod: pendingPass.issueMethod || form.issueMethod || "sms",
+        merchantShopName: merchant.shopName,
+        merchantOwnerName: merchant.ownerName,
+        merchantPhone: merchant.phone,
       });
 
       const inviteId = result.inviteId || result.requestId || pendingPass.id;
       const inviteCode = result.inviteCode || "";
-      const inviteUrl = result.link || result.inviteUrl || "";
+      const inviteUrl = result.inviteUrl || result.url || deepLinkFor(pendingPass.phone, inviteId, inviteCode);
 
       const { history, visitCount, ...newPass } = pendingPass;
       const next = [
@@ -621,6 +749,7 @@ export default function App() {
           inviteId,
           inviteCode,
           status: "발행 완료",
+          issueMethod: pendingPass.issueMethod || form.issueMethod || "sms",
           serverSynced: true,
           serverInviteUrl: inviteUrl,
         }),
@@ -652,6 +781,100 @@ export default function App() {
     }
   }
 
+
+  async function handleIssueQrPass() {
+    setError("");
+
+    if (!Array.isArray(form.selectedGateIds) || form.selectedGateIds.length === 0) {
+      setError("대상 차단기를 1개 이상 선택해 주세요.");
+      return;
+    }
+
+    if (remainingPasses <= 0) {
+      setError("잔여 주차권이 없습니다. 운영자에게 충전 요청이 필요합니다.");
+      return;
+    }
+
+    const usageLimit = Number(form.usageLimit || 1);
+    if (usageLimit < 1 || usageLimit > remainingPasses) {
+      setError(`사용 가능 횟수는 1회 이상, 잔여 주차권 ${remainingPasses}회 이하로 설정해 주세요.`);
+      return;
+    }
+
+    const validFrom = new Date(form.ticketValidFrom);
+    const validUntil = new Date(form.ticketValidUntil);
+    if (Number.isNaN(validFrom.getTime()) || Number.isNaN(validUntil.getTime())) {
+      setError("주차권 사용 시작일시와 종료일시를 확인해 주세요.");
+      return;
+    }
+
+    if (validUntil.getTime() <= validFrom.getTime()) {
+      setError("주차권 사용 종료일시는 시작일시보다 늦어야 합니다.");
+      return;
+    }
+
+    const selectedGateIds = normalizeGateIds(form.selectedGateIds);
+    const selectedGateNames = gateNamesFromIds(selectedGateIds, merchant.parkingGates);
+
+    setQrBusy(true);
+    setApiStatus("서버에 QR 주차권 등록 요청 중입니다...");
+
+    try {
+      const result = await requestQrParkingPass({
+        visitorName: form.visitorName.trim() || "QR 방문자",
+        parkingGateIds: selectedGateIds,
+        parkingGateNames: selectedGateNames,
+        validMinutes: Number(form.durationMinutes),
+        memo: form.memo.trim(),
+        usageLimit,
+        ticketValidFrom: validFrom.toISOString(),
+        ticketValidUntil: validUntil.toISOString(),
+        merchant,
+      });
+
+      const inviteId = result.inviteId || result.requestId || result.id || safeUuid();
+      const inviteCode = result.inviteCode || result.code || inviteId;
+      const inviteUrl = result.inviteUrl || result.url || deepLinkFor("", inviteId, inviteCode);
+
+      const newQrInvite = sanitizeInvite({
+        id: inviteId,
+        inviteId,
+        inviteCode,
+        visitorName: form.visitorName.trim() || "QR 방문자",
+        phone: "QR 스캔 발급",
+        shopName: merchant.shopName,
+        parkingGateIds: selectedGateIds,
+        parkingGateNames: selectedGateNames,
+        memo: form.memo.trim(),
+        durationMinutes: Number(form.durationMinutes),
+        expiresAt: futureIso(Number(form.durationMinutes)),
+        ticketValidFrom: validFrom.toISOString(),
+        ticketValidUntil: validUntil.toISOString(),
+        usageLimit,
+        status: "발행 완료",
+        issueMethod: "qr",
+        createdAt: nowIso(),
+        serverSynced: true,
+        serverInviteUrl: inviteUrl,
+      });
+
+      persistInvites([newQrInvite, ...invites]);
+      setQrTicket({
+        ...newQrInvite,
+        inviteUrl,
+      });
+      setQrTicketUsed(false);
+      setQrModalOpen(true);
+      setToast("QR 주차권이 서버에 등록되었습니다.");
+      setApiStatus("");
+    } catch (err) {
+      setApiStatus("");
+      setError(err?.message || "QR 주차권 등록 중 오류가 발생했습니다.");
+    } finally {
+      setQrBusy(false);
+    }
+  }
+
   function markAppReceived(inviteId) {
     const next = invites.map((item) =>
       item.id === inviteId ? { ...item, status: "앱 수신" } : item
@@ -680,10 +903,15 @@ export default function App() {
     const seed = makeSeedInvites();
     localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(defaultMerchant));
     localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(seed));
+    localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify([]));
     setMerchant(defaultMerchant);
     setInvites(seed);
+    setFavorites([]);
     setPendingPass(null);
     setConfirmModalOpen(false);
+    setQrTicket(null);
+    setQrTicketUsed(false);
+    setQrModalOpen(false);
     resetForm();
     setShowHistoryPanel(false);
     setToast("데모 데이터를 초기화했습니다.");
@@ -733,7 +961,7 @@ export default function App() {
             <h1 className="text-xl font-bold sm:text-2xl">{merchant.shopName} 주차 방문 관리</h1>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={resetDemoData}
               className="rounded-2xl border px-4 py-2 text-sm font-medium leading-tight shadow-sm hover:bg-slate-50"
@@ -825,14 +1053,14 @@ export default function App() {
                   setConfirmModalOpen(false);
                   setPendingPass(null);
                 }}
-                className="rounded-2xl border px-5 py-3 font-medium hover:bg-slate-50"
+                className="rounded-lg border px-2.5 py-1.5 text-[12px] font-medium hover:bg-slate-50"
               >
                 취소
               </button>
               <button
                 type="button"
                 onClick={confirmIssuePass}
-                className="rounded-2xl bg-slate-900 px-5 py-3 font-medium text-white shadow-sm hover:opacity-90"
+                className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[12px] font-medium text-white shadow-sm hover:opacity-90"
               >
                 확인 후 링크 발송
               </button>
@@ -841,14 +1069,104 @@ export default function App() {
         ) : null}
       </Modal>
 
-      <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-12 lg:px-8">
-        <section className="space-y-6 lg:col-span-8">
-          <form onSubmit={handleOpenConfirm} className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">
-            <div className="mb-5 flex items-start justify-between gap-3">
+      <Modal
+        open={qrModalOpen}
+        title="QR 주차권 발행"
+        onClose={() => setQrModalOpen(false)}
+      >
+        {qrTicket ? (
+          <div className="space-y-5">
+            <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2">
+              <p><span className="font-medium text-slate-700">방문자명:</span> {qrTicket.visitorName}</p>
+              <p><span className="font-medium text-slate-700">상태:</span> 서버 등록 완료</p>
+              <p className="sm:col-span-2"><span className="font-medium text-slate-700">대상 차단기:</span> {qrTicket.parkingGateNames.join(", ")}</p>
+              <p><span className="font-medium text-slate-700">유효시간:</span> {displayDuration(qrTicket.durationMinutes)}</p>
+              <p><span className="font-medium text-slate-700">사용 가능 횟수:</span> {qrTicket.usageLimit}회</p>
+              <p className="sm:col-span-2"><span className="font-medium text-slate-700">주차권 사용기간:</span> {displayDate(qrTicket.ticketValidFrom)} ~ {displayDate(qrTicket.ticketValidUntil)}</p>
+            </div>
+
+            <div className="rounded-2xl border p-4">
+              <div className="flex flex-col items-center gap-3">
+                {qrTicketUsed ? (
+                  <div className="flex h-64 w-64 items-center justify-center rounded-2xl border border-dashed bg-slate-50 p-6 text-center text-lg font-bold text-slate-500">
+                    새로 발급해 주세요
+                  </div>
+                ) : (
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(qrTicket.inviteUrl)}`}
+                    alt="QR Code"
+                    className="h-64 w-64 rounded-2xl border bg-white p-2"
+                  />
+                )}
+                <p className="text-xs text-slate-500">
+                  방문자 폰으로 스캔하면 서버에 등록된 실제 주차권 코드로 열립니다. 사용 처리 후에는 같은 팝업에서 새 QR을 발행할 수 있습니다.
+                </p>
+                {!qrTicketUsed ? (
+                  <div className="w-full rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-700 break-all">
+                    {qrTicket.inviteUrl}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  const usedAt = nowIso();
+                  setQrTicketUsed(true);
+                  setQrTicket((prev) => (prev ? { ...prev, status: "사용 완료", usedAt } : prev));
+                  persistInvites(invites.map((item) => item.id === qrTicket.id ? { ...item, status: "사용 완료", usedAt } : item));
+                  setToast("QR 사용 처리되었습니다. 새로 발급해 주세요.");
+                }}
+                disabled={qrTicketUsed}
+                className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                사용 처리
+              </button>
+              <button
+                type="button"
+                onClick={handleIssueQrPass}
+                disabled={qrBusy}
+                className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {qrBusy ? "발행 중..." : "새 QR 발행"}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(qrTicket.inviteUrl);
+                    setToast("QR 링크를 복사했습니다.");
+                  } catch {
+                    setError("클립보드 복사에 실패했습니다.");
+                  }
+                }}
+                disabled={qrTicketUsed}
+                className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                링크 복사
+              </button>
+              <button
+                type="button"
+                onClick={() => setQrModalOpen(false)}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <main className="mx-auto grid max-w-7xl gap-3 px-3 py-3 sm:px-4 lg:grid-cols-12 lg:px-6">
+        <section className="space-y-3 lg:col-span-8">
+          <form onSubmit={handleOpenConfirm} className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
+            <div className="mb-3 flex items-start justify-between gap-2">
               <div>
                 <h2 className="text-lg font-semibold sm:text-xl">방문자 주차권 발행</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  유효시간은 주차권을 발행한 시점부터 적용됩니다.
+                  유효시간은 방문자가 실제로 주차권을 사용한 시점부터 적용됩니다.
                 </p>
               </div>
 
@@ -857,181 +1175,248 @@ export default function App() {
               </span>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-sm font-medium">방문자 이름</label>
-                <input
-                  value={form.visitorName}
-                  onChange={(e) => handleChange("visitorName", e.target.value)}
-                  className="w-full rounded-2xl border bg-white px-4 py-3 outline-none transition focus:border-slate-400"
-                  placeholder="예: 김민수"
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium">전화번호</label>
-                <input
-                  value={form.phone}
-                  onChange={(e) => handleChange("phone", e.target.value)}
-                  className="w-full rounded-2xl border bg-white px-4 py-3 outline-none transition focus:border-slate-400"
-                  placeholder="010-0000-0000"
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium">유효시간</label>
-                <select
-                  value={form.durationMinutes}
-                  onChange={(e) => handleChange("durationMinutes", e.target.value)}
-                  className="w-full rounded-2xl border bg-white px-4 py-3 outline-none focus:border-slate-400"
-                >
-                  {DURATION_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="mt-2 text-xs text-slate-500">
-                  시작/종료일시를 직접 수정하지 않았다면, 유효시간 선택 시 현재 시각 기준으로 자동 반영됩니다.
-                </p>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-sm font-medium">사용 가능 횟수</label>
-                <input
-                  type="number"
-                  min="1"
-                  max={Math.max(remainingPasses, 1)}
-                  value={form.usageLimit}
-                  onChange={(e) => handleChange("usageLimit", e.target.value)}
-                  className="w-full rounded-2xl border bg-white px-4 py-3 outline-none focus:border-slate-400"
-                />
-                <p className="mt-2 text-xs text-slate-500">잔여 주차권 범위 내에서만 설정할 수 있습니다. 현재 최대 {remainingPasses}회</p>
-              </div>
-            </div>
-
-            <div className="mt-4 rounded-2xl border p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <label className="block text-sm font-medium">대상 차단기</label>
-                <span className="text-xs text-slate-500">1개 이상 선택</span>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label
-                  className={`flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition sm:col-span-2 ${
-                    allChecked || someChecked ? "border-slate-900 bg-slate-50" : "hover:bg-slate-50"
-                  }`}
-                >
-                  <input
-                    ref={allBarrierCheckboxRef}
-                    type="checkbox"
-                    checked={allChecked}
-                    onChange={toggleAllBarriers}
-                    className="h-4 w-4 shrink-0"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium">모든 차단기</div>
-                    <div className="mt-0.5 text-xs text-slate-500">체크하면 차단기 1~4가 모두 선택됩니다.</div>
-                  </div>
-                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-                    {form.selectedGateIds.length}/{allBarrierIds.length} 선택
-                  </span>
-                </label>
-
-                {merchant.parkingGates.map((barrier) => {
-                  const checked = form.selectedGateIds.includes(barrier.id);
-                  return (
-                    <label
-                      key={barrier.id}
-                      className={`flex cursor-pointer items-center gap-3 rounded-2xl border px-4 py-3 transition ${
-                        checked ? "border-slate-900 bg-slate-50" : "hover:bg-slate-50"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleBarrier(barrier.id)}
-                        className="h-4 w-4 shrink-0"
-                      />
-                      <span className="min-w-0 flex-1 font-medium">{barrier.name}</span>
-                      {checked ? (
-                        <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200">선택됨</span>
-                      ) : null}
-                    </label>
-                  );
-                })}
-              </div>
-
-              <div className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                <span className="font-medium text-slate-700">선택된 차단기:</span>{" "}
-                {selectedBarrierNames.length > 0 ? selectedBarrierNames.join(", ") : "없음"}
-              </div>
-            </div>
-
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <label className="block text-sm font-medium">주차권 사용 시작일시</label>
+            <div className="mb-3 rounded-2xl border border-amber-100 bg-amber-50/60 p-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[12px] font-semibold text-amber-900">자주 쓰는 발행 조건</p>
+                  <p className="text-[10px] text-amber-800">유효시간, 횟수, 시작/종료 시간, 발행 방식을 저장하고 다시 불러옵니다.</p>
                 </div>
-                <input
-                  type="datetime-local"
-                  value={form.ticketValidFrom}
-                  onChange={(e) => handleChange("ticketValidFrom", e.target.value)}
-                  className="w-full rounded-2xl border bg-white px-4 py-3 outline-none focus:border-slate-400"
-                />
+                <div className="flex gap-1.5">
+                  <input
+                    value={favoriteName}
+                    onChange={(e) => setFavoriteName(e.target.value)}
+                    className="min-w-0 rounded-md border bg-white px-2 py-1 text-[12px] outline-none focus:border-amber-400"
+                    placeholder="예: 1시간 1회 QR"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveCurrentAsFavorite}
+                    className="shrink-0 rounded-md bg-amber-900 px-2.5 py-1 text-[12px] font-semibold text-white hover:opacity-90"
+                  >
+                    저장
+                  </button>
+                </div>
               </div>
 
-              <div>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <label className="block text-sm font-medium">주차권 사용 종료일시</label>
+              {favorites.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {favorites.map((favorite) => (
+                    <div key={favorite.id} className="flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] ring-1 ring-amber-200">
+                      <button type="button" onClick={() => applyFavorite(favorite)} className="font-semibold text-amber-950 hover:underline">
+                        {favorite.name}
+                      </button>
+                      <span className="text-amber-700">{displayDuration(favorite.durationMinutes)} · {favorite.usageLimit}회 · {favorite.issueMethod === "qr" ? "QR" : "SMS"}</span>
+                      <button type="button" onClick={() => removeFavorite(favorite.id)} className="ml-1 text-amber-700 hover:text-rose-600">
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1">
+                <div className="flex items-center gap-1.5">
+                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">이름</label>
+                  <input
+                    value={form.visitorName}
+                    onChange={(e) => handleChange("visitorName", e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none transition focus:border-slate-400"
+                    placeholder="김민수"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1">
+                <div className="flex items-center gap-1.5">
+                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">전화</label>
+                  <input
+                    value={form.phone}
+                    onChange={(e) => handleChange("phone", e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none transition focus:border-slate-400"
+                    placeholder="010-0000-0000"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1">
+                <div className="flex items-center gap-1.5">
+                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">유효</label>
+                  <select
+                    value={form.durationMinutes}
+                    onChange={(e) => handleChange("durationMinutes", e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none focus:border-slate-400"
+                  >
+                    {DURATION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1">
+                <div className="flex items-center gap-1.5">
+                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">횟수</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={Math.max(remainingPasses, 1)}
+                    value={form.usageLimit}
+                    onChange={(e) => handleChange("usageLimit", e.target.value)}
+                    className="min-w-0 w-14 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none focus:border-slate-400"
+                  />
+                  <span className="truncate text-[10px] text-slate-500">/{remainingPasses}</span>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 col-span-2">
+                <div className="flex items-center gap-1.5">
+                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">방식</label>
+                  <select
+                    value={form.issueMethod}
+                    onChange={(e) => handleChange("issueMethod", e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none focus:border-slate-400"
+                  >
+                    {ISSUE_METHOD_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 col-span-2">
+                <div className="grid grid-cols-[1fr_auto] gap-1.5">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">시작</label>
+                    <input
+                      type="datetime-local"
+                      value={form.ticketValidFrom}
+                      onChange={(e) => handleChange("ticketValidFrom", e.target.value)}
+                      className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[11px] outline-none focus:border-slate-400"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => applyDefaultValidityRange(form.durationMinutes)}
-                    className="text-xs font-medium text-slate-600 underline underline-offset-2"
+                    className="rounded-md border px-2 py-1 text-[11px] font-medium hover:bg-slate-50 whitespace-nowrap"
                   >
-                    현재 기준 기본값 적용
+                    현재 기준
                   </button>
                 </div>
-                <input
-                  type="datetime-local"
-                  value={form.ticketValidUntil}
-                  onChange={(e) => handleChange("ticketValidUntil", e.target.value)}
-                  className="w-full rounded-2xl border bg-white px-4 py-3 outline-none focus:border-slate-400"
-                />
               </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 col-span-2">
+                <div className="flex items-center gap-1.5">
+                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">종료</label>
+                  <input
+                    type="datetime-local"
+                    value={form.ticketValidUntil}
+                    onChange={(e) => handleChange("ticketValidUntil", e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[11px] outline-none focus:border-slate-400"
+                  />
+                </div>
+              </div>
+
+              <p className="col-span-2 text-[10px] leading-tight text-slate-500">
+                유효시간은 실제 사용 시점부터 적용됩니다. 시작/종료일시를 직접 수정하지 않으면 현재 시각 기준으로 자동 반영됩니다.
+              </p>
             </div>
 
-            <div className="mt-4">
-              <label className="mb-2 block text-sm font-medium">메모</label>
-              <textarea
-                value={form.memo}
-                onChange={(e) => handleChange("memo", e.target.value)}
-                className="min-h-28 w-full rounded-2xl border bg-white px-4 py-3 outline-none focus:border-slate-400"
-                placeholder="차량번호 또는 방문 목적을 입력하세요."
-              />
+            <div className="mt-1.5 rounded-lg border p-1.5">
+              <button
+                type="button"
+                onClick={() => setBarrierSectionOpen((prev) => !prev)}
+                className="flex w-full items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1.5 text-left"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] font-semibold text-slate-800">대상 차단기</span>
+                    <span className="rounded-full bg-white px-1.5 py-0.5 text-[9px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                      {form.selectedGateIds.length}/{allBarrierIds.length}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 truncate text-[10px] text-slate-600">
+                    {selectedBarrierNames.length > 0 ? selectedBarrierNames.join(", ") : "차단기를 선택해 주세요"}
+                  </p>
+                </div>
+                <span className="shrink-0 text-[11px] font-medium text-slate-600">
+                  {barrierSectionOpen ? "접기" : "펼치기"}
+                </span>
+              </button>
+
+              {barrierSectionOpen ? (
+                <div className="mt-1.5 grid gap-1">
+                  <label
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 transition ${
+                      allChecked || someChecked ? "border-slate-900 bg-slate-50" : "hover:bg-slate-50"
+                    }`}
+                  >
+                    <input
+                      ref={allBarrierCheckboxRef}
+                      type="checkbox"
+                      checked={allChecked}
+                      onChange={toggleAllBarriers}
+                      className="h-3 w-3 shrink-0"
+                    />
+                    <span className="min-w-0 flex-1 text-[12px] font-medium">모든 차단기</span>
+                    <span className="rounded-full bg-white px-1.5 py-0.5 text-[9px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                      {form.selectedGateIds.length}/{allBarrierIds.length}
+                    </span>
+                  </label>
+
+                  <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
+                    {merchant.parkingGates.map((barrier) => {
+                      const checked = form.selectedGateIds.includes(barrier.id);
+                      return (
+                        <label
+                          key={barrier.id}
+                          className={`flex cursor-pointer items-center justify-center gap-1 rounded-lg border px-1.5 py-1.5 text-center transition ${
+                            checked ? "border-slate-900 bg-slate-50" : "hover:bg-slate-50"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleBarrier(barrier.id)}
+                            className="h-3 w-3 shrink-0"
+                          />
+                          <span className="text-[11px] font-medium leading-none">{barrier.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
+
 
             {error ? (
-              <div className="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</div>
+              <div className="mt-2 rounded-xl bg-rose-50 px-2.5 py-2 text-[12px] font-medium text-rose-700">{error}</div>
             ) : null}
 
             {apiStatus ? (
-              <div className="mt-4 rounded-2xl bg-slate-100 px-4 py-3 text-sm font-medium text-slate-700">{apiStatus}</div>
+              <div className="mt-2 rounded-xl bg-slate-100 px-2.5 py-2 text-[12px] font-medium text-slate-700">{apiStatus}</div>
             ) : null}
 
-            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="rounded-2xl border px-5 py-3 font-medium hover:bg-slate-50"
-              >
-                초기화
-              </button>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="submit"
-                className="rounded-2xl bg-slate-900 px-5 py-3 font-medium text-white shadow-sm hover:opacity-90"
+                className="flex w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-3 text-[15px] font-semibold text-white shadow-sm hover:opacity-90 sm:py-3.5"
               >
                 주차권 발행
+              </button>
+              <button
+                type="button"
+                onClick={handleIssueQrPass}
+                disabled={qrBusy}
+                className="flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-[15px] font-semibold text-slate-900 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:py-3.5"
+              >
+                {qrBusy ? "QR 서버 등록 중..." : "QR Code 발행"}
               </button>
             </div>
           </form>
@@ -1039,14 +1424,14 @@ export default function App() {
           <div className="mt-4 grid grid-cols-3 gap-2">
             {stats.map((item) => (
               <div key={item.label} className="rounded-2xl bg-white px-4 py-3 shadow-sm ring-1 ring-slate-200">
-                <p className="text-xs text-slate-500">{item.label}</p>
+                <p className="text-[11px] text-slate-500">{item.label}</p>
                 <p className="mt-1 text-xl font-bold">{item.value}</p>
               </div>
             ))}
           </div>
 
           {showHistoryPanel ? (
-            <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">
+            <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h2 className="text-lg font-semibold sm:text-xl">최근 발행 내역</h2>
@@ -1094,6 +1479,7 @@ export default function App() {
                             <p>대상 차단기: {row.parkingGateNames.join(", ")}</p>
                             <p>유효시간: {displayDuration(row.durationMinutes)}</p>
                             <p>사용 가능 횟수: {row.usageLimit}회</p>
+                            <p>발행 방식: {row.issueMethod === "qr" ? "QR Code" : "SMS 링크"}</p>
                             <p>생성 시각: {displayDate(row.createdAt)}</p>
                             <p className="sm:col-span-2">주차권 사용기간: {displayDate(row.ticketValidFrom)} ~ {displayDate(row.ticketValidUntil)}</p>
                             <p className="sm:col-span-2">메모: {row.memo || "-"}</p>
@@ -1143,7 +1529,7 @@ export default function App() {
         </section>
 
         <aside className="space-y-6 lg:col-span-4">
-          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">
+          <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
             <h2 className="text-lg font-semibold">상가 정보</h2>
             <div className="mt-4 space-y-3 text-sm">
               <div className="flex justify-between">
@@ -1165,7 +1551,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">
+          <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
             <h2 className="text-lg font-semibold">서버 연동 상태</h2>
             <div className="mt-4 space-y-2 text-sm">
               <p className="break-all text-slate-600">API: {API_BASE_URL}</p>
@@ -1179,7 +1565,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-6">
+          <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
             <h2 className="text-lg font-semibold">빠른 메뉴</h2>
             <div className="mt-4 grid grid-cols-2 gap-3">
               {quickMenus.map((item) => (
