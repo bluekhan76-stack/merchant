@@ -117,7 +117,11 @@ function isValidPhone(value) {
 
 function deepLinkFor(phone, inviteId, inviteCode) {
   const inviteKey = inviteCode || inviteId || "";
-  const url = new URL(`${window.location.origin}/open`);
+  // KakaoTalk/SMS/email에서 custom scheme(bluekhan://)를 직접 열면 차단될 수 있습니다.
+  // 따라서 외부 공유용 링크는 항상 현재 웹 도메인의 루트 경로 + code 파라미터로 만듭니다.
+  // 예: https://your-domain.amplifyapp.com/?code=ABC123
+  // 이 링크를 열면 App이 OpenBridgePage를 렌더링하고, OpenBridgePage가 앱을 실행합니다.
+  const url = new URL(window.location.origin);
   url.searchParams.set("code", inviteKey);
   return url.toString();
 }
@@ -388,10 +392,11 @@ function Modal({ open, title, onClose, children }) {
 export default function App() {
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
   const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
-  const inviteCodeFromUrl = searchParams?.get("code") || searchParams?.get("inviteCode") || "";
+  const inviteCodeFromUrl = searchParams?.get("code") || "";
 
-  // 외부 공유 링크(/open?code=...) 또는 일부 앱/브라우저가 /?code=... 형태로 여는 경우 모두
-  // 관리자 메인 화면이 아니라 앱 실행 브릿지 화면으로 이동시킵니다.
+  // /open?code=... 뿐 아니라 /?code=... 도 앱 실행 브릿지 화면으로 처리합니다.
+  // Amplify rewrite 설정이 누락되어 /open 경로가 404가 나는 경우를 피하기 위해
+  // 외부 공유 링크는 /?code=... 형태를 기본으로 사용합니다.
   if (pathname === "/open" || inviteCodeFromUrl) {
     return <OpenBridgePage />;
   }
