@@ -108,7 +108,7 @@ export default function SignupPage() {
               autoCapitalize="none"
               spellCheck="false"
               value={username}
-              onChange={(event) => setUsername(normalizeUsername(event.target.value))}
+              onChange={(event) => setUsername(event.target.value)}
               className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-slate-900"
               placeholder="예: merchant001 또는 shop-a201"
               autoComplete="username"
