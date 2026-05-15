@@ -3,9 +3,23 @@ import { useNavigate } from "react-router-dom";
 import { clearSession } from "../auth/auth.js";
 
 const seedRequests = [
-  { id: "req-1", shopName: "A동 201호", ownerName: "정태윤", phone: "010-1111-2222", address: "수원시 영통구 예시로 123", status: "PENDING" },
-  { id: "req-2", shopName: "B동 103호", ownerName: "김대표", phone: "010-2222-3333", address: "수원시 영통구 예시로 456", status: "PENDING" },
+  { id: "req-1", requestedUsername: "merchant001", status: "PENDING", createdAt: "2026-05-15T00:00:00.000Z" },
 ];
+
+function formatDate(value) {
+  if (!value) return "-";
+  try {
+    return new Intl.DateTimeFormat("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value));
+  } catch {
+    return "-";
+  }
+}
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -43,14 +57,16 @@ export default function AdminDashboard() {
       <main className="mx-auto max-w-6xl px-4 py-6">
         <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
           <h2 className="text-xl font-bold">상가 가입 신청 관리</h2>
+          <p className="mt-2 text-sm text-slate-600">
+            개인정보 최소 수집 정책에 따라 상가명, 대표자명, 연락처, 주소는 표시하지 않습니다.
+          </p>
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[640px] text-left text-sm">
               <thead className="border-b text-slate-500">
                 <tr>
-                  <th className="py-3">상가명</th>
-                  <th>대표자</th>
-                  <th>연락처</th>
-                  <th>주소</th>
+                  <th className="py-3">신청 ID</th>
+                  <th>희망 로그인 ID</th>
+                  <th>신청일</th>
                   <th>상태</th>
                   <th className="text-right">처리</th>
                 </tr>
@@ -58,10 +74,9 @@ export default function AdminDashboard() {
               <tbody>
                 {requests.map((item) => (
                   <tr key={item.id} className="border-b last:border-0">
-                    <td className="py-3 font-semibold">{item.shopName}</td>
-                    <td>{item.ownerName}</td>
-                    <td>{item.phone}</td>
-                    <td>{item.address}</td>
+                    <td className="py-3 font-semibold">{item.id}</td>
+                    <td>{item.requestedUsername || "-"}</td>
+                    <td>{formatDate(item.createdAt)}</td>
                     <td>{item.status}</td>
                     <td className="space-x-2 text-right">
                       <button onClick={() => updateStatus(item.id, "APPROVED")} className="rounded-xl border px-3 py-2 hover:bg-emerald-50">승인</button>
