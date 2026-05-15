@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { fetchAuthSession, signOut } from "aws-amplify/auth";
 import { completeNewPassword, login, LOGIN_CHALLENGES, ROLES } from "../auth/auth.js";
 
 export default function LoginPage() {
@@ -11,6 +12,7 @@ export default function LoginPage() {
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
   const [requireNewPassword, setRequireNewPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState("");
 
   const moveByRole = (session) => {
@@ -23,6 +25,66 @@ export default function LoginPage() {
     }
   };
 
+  const getRoleFromSession = async () => {
+    const session = await fetchAuthSession();
+    const idToken = session.tokens?.idToken;
+
+    if (!idToken) {
+      return null;
+    }
+
+    const groups = idToken.payload?.["cognito:groups"] || [];
+
+    if (groups.includes(ROLES.ADMIN)) {
+      return ROLES.ADMIN;
+    }
+
+    if (groups.includes(ROLES.MERCHANT)) {
+      return ROLES.MERCHANT;
+    }
+
+    return "PENDING";
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function checkExistingSession() {
+      try {
+        const role = await getRoleFromSession();
+
+        if (!isMounted) return;
+
+        if (role === ROLES.ADMIN) {
+          navigate("/admin", { replace: true });
+        } else if (role === ROLES.MERCHANT) {
+          navigate("/merchant", { replace: true });
+        } else if (role === "PENDING") {
+          navigate("/pending", { replace: true });
+        }
+      } catch (err) {
+        // 세션이 없거나 만료된 상태는 정상입니다. 로그인 화면을 그대로 보여줍니다.
+      } finally {
+        if (isMounted) {
+          setCheckingSession(false);
+        }
+      }
+    }
+
+    checkExistingSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [navigate]);
+
+  const clearLegacyDemoSession = () => {
+    // 이전 데모 로그인 코드에서 남겨둔 값이 있으면 제거합니다.
+    localStorage.removeItem("role");
+    localStorage.removeItem("isAuthenticated");
+    localStorage.removeItem("session");
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
@@ -30,6 +92,8 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      clearLegacyDemoSession();
+
       if (requireNewPassword) {
         if (newPassword.length < 8) {
           throw new Error("새 비밀번호는 최소 8자 이상으로 입력해 주세요.");
@@ -48,8 +112,24 @@ export default function LoginPage() {
         return;
       }
 
+      if (!userId.trim()) {
+        throw new Error("아이디를 입력해 주세요.");
+      }
+
+      if (!password) {
+        throw new Error("비밀번호를 입력해 주세요.");
+      }
+
+      // Amplify는 기존 로그인 세션이 남아 있으면 "There is already a signed in user."를 발생시킬 수 있습니다.
+      // 새 로그인을 시도하기 전에 기존 Cognito 세션을 정리합니다.
+      try {
+        await signOut();
+      } catch (err) {
+        // 이미 로그아웃 상태이면 무시합니다.
+      }
+
       const result = await login({
-        userId,
+        userId: userId.trim(),
         password,
       });
 
@@ -62,11 +142,47 @@ export default function LoginPage() {
 
       moveByRole(result);
     } catch (err) {
-      setError(err?.message || "로그인에 실패했습니다.");
+      const message = err?.message || "로그인에 실패했습니다.";
+
+      if (message.includes("There is already a signed in user")) {
+        setError("기존 로그인 세션을 정리했습니다. 다시 로그인해 주세요.");
+        try {
+          await signOut();
+        } catch (signOutErr) {
+          // 무시
+        }
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  const handleCancelNewPassword = async () => {
+    try {
+      await signOut();
+    } catch (err) {
+      // 무시
+    }
+
+    setRequireNewPassword(false);
+    setPassword("");
+    setNewPassword("");
+    setNewPasswordConfirm("");
+    setError("");
+  };
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen bg-slate-50 px-4 py-10 text-slate-950">
+        <div className="mx-auto max-w-md rounded-3xl bg-white p-6 text-center shadow-sm ring-1 ring-slate-200">
+          <p className="text-sm text-slate-500">방문자 주차권 시스템</p>
+          <h1 className="mt-1 text-2xl font-bold">로그인 상태 확인 중...</h1>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 text-slate-950">
@@ -91,6 +207,7 @@ export default function LoginPage() {
               disabled={requireNewPassword || loading}
               className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-slate-900 disabled:bg-slate-100"
               placeholder="아이디"
+              autoComplete="username"
             />
           </label>
 
@@ -103,6 +220,7 @@ export default function LoginPage() {
                 type="password"
                 className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-slate-900"
                 placeholder="비밀번호"
+                autoComplete="current-password"
               />
             </label>
           )}
@@ -117,6 +235,7 @@ export default function LoginPage() {
                   type="password"
                   className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-slate-900"
                   placeholder="새 비밀번호"
+                  autoComplete="new-password"
                 />
               </label>
 
@@ -128,6 +247,7 @@ export default function LoginPage() {
                   type="password"
                   className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-slate-900"
                   placeholder="새 비밀번호 확인"
+                  autoComplete="new-password"
                 />
               </label>
             </>
@@ -142,6 +262,17 @@ export default function LoginPage() {
           >
             {loading ? "처리 중..." : requireNewPassword ? "새 비밀번호 설정" : "로그인"}
           </button>
+
+          {requireNewPassword && (
+            <button
+              type="button"
+              onClick={handleCancelNewPassword}
+              disabled={loading}
+              className="w-full rounded-2xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 disabled:opacity-60"
+            >
+              취소하고 다시 로그인
+            </button>
+          )}
         </form>
 
         {!requireNewPassword && (
