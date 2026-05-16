@@ -12,7 +12,94 @@ const API_BASE_URL =
 
 const API_PATHS = {
   requestPass: "/passes/request",
+  merchantMe: "/merchant/me",
 };
+
+
+function getIdToken() {
+  const directKeys = ["idToken", "accessToken", "parking_id_token", "parking_access_token"];
+
+  for (const key of directKeys) {
+    const value = localStorage.getItem(key);
+    if (value) return value;
+  }
+
+  for (const key of Object.keys(localStorage)) {
+    if (!key.toLowerCase().includes("token") && !key.toLowerCase().includes("session")) continue;
+
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key));
+      if (parsed?.idToken) return parsed.idToken;
+      if (parsed?.accessToken) return parsed.accessToken;
+      if (parsed?.tokens?.idToken) return parsed.tokens.idToken;
+      if (parsed?.tokens?.accessToken) return parsed.tokens.accessToken;
+    } catch {
+      // plain string token은 directKeys에서 처리합니다.
+    }
+  }
+
+  return "";
+}
+
+function planLabel(planLimit) {
+  if (planLimit === -1 || planLimit === "unlimited") return "무제한";
+  if (planLimit === undefined || planLimit === null || planLimit === "") return "-";
+  return `월 ${planLimit}건`;
+}
+
+function mapMerchantFromApi(item) {
+  const planLimit = item?.planLimit === "unlimited" ? -1 : Number(item?.planLimit ?? defaultMerchant.monthlyQuota);
+  const buildingName = item?.buildingName || item?.shopName || defaultMerchant.shopName;
+  const roomNo = item?.roomNo || "";
+  const shopName = roomNo ? `${buildingName} ${roomNo}` : buildingName;
+
+  return {
+    ...defaultMerchant,
+    ...item,
+    merchantId: item?.merchantId || "",
+    email: item?.email || "",
+    buildingName,
+    roomNo,
+    shopName,
+    ownerName: item?.ownerName || item?.email || defaultMerchant.ownerName,
+    address: item?.address || buildingName,
+    planLimit,
+    planName: planLabel(planLimit),
+    monthlyQuota: planLimit,
+    usedCount: Number(item?.usedCount || 0),
+    isActive: item?.isActive !== false,
+    status: item?.status || "approved",
+    parkingGates: defaultMerchant.parkingGates,
+  };
+}
+
+async function fetchMerchantMe() {
+  const token = getIdToken();
+
+  if (!token) {
+    throw new Error("로그인 토큰이 없습니다. 다시 로그인해 주세요.");
+  }
+
+  const response = await fetch(`${API_BASE_URL}${API_PATHS.merchantMe}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.message || `상가 정보를 불러오지 못했습니다. (${response.status})`);
+  }
+
+  return mapMerchantFromApi(data.merchant || data.item || data);
+}
 
 const BARRIER_OPTIONS = [
   { id: "gate-1", name: "차단기 1" },
@@ -298,6 +385,7 @@ async function requestParkingPass({
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...(getIdToken() ? { Authorization: `Bearer ${getIdToken()}` } : {}),
     },
     body: JSON.stringify({
       phone: normalizedPhone,
@@ -410,63 +498,59 @@ export default function MerchantDashboard() {
   const [inviteResultModalOpen, setInviteResultModalOpen] = useState(false);
 
   useEffect(() => {
-    try {
-      const savedMerchant = localStorage.getItem(STORAGE_KEYS.merchant);
-      const savedInvites = localStorage.getItem(STORAGE_KEYS.invites);
+    let cancelled = false;
 
-      if (savedMerchant) {
-        const parsedMerchant = JSON.parse(savedMerchant);
-        const parkingGatesSource = parsedMerchant?.parkingGates || parsedMerchant?.anchors;
-        const normalizedParkingGates =
-          Array.isArray(parkingGatesSource) && parkingGatesSource.length > 0
-            ? BARRIER_OPTIONS.map((defaultGate, index) => {
-                const savedGate = parkingGatesSource[index] || {};
-                return {
-                  id: savedGate?.id || savedGate?.anchorId || defaultGate.id,
-                  name: defaultGate.name,
-                };
-              })
-            : BARRIER_OPTIONS;
+    async function loadMerchantAndLocalData() {
+      setApiStatus("상가 정보를 불러오는 중입니다...");
 
-        const nextMerchant = {
-          ...defaultMerchant,
-          ...parsedMerchant,
-          parkingGates: normalizedParkingGates,
-        };
+      try {
+        const nextMerchant = await fetchMerchantMe();
+        if (!cancelled) {
+          setMerchant(nextMerchant);
+          localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(nextMerchant));
+          setApiStatus("");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err?.message || "상가 정보를 불러오지 못했습니다.");
+          setApiStatus("");
 
-        setMerchant(nextMerchant);
-        localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(nextMerchant));
-      } else {
-        localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(defaultMerchant));
+          const savedMerchant = localStorage.getItem(STORAGE_KEYS.merchant);
+          if (savedMerchant) {
+            try {
+              setMerchant({ ...defaultMerchant, ...JSON.parse(savedMerchant), parkingGates: BARRIER_OPTIONS });
+            } catch {
+              setMerchant(defaultMerchant);
+            }
+          }
+        }
       }
 
-      if (savedInvites) {
-        const parsedInvites = JSON.parse(savedInvites);
-        const safeInvites = Array.isArray(parsedInvites)
-          ? parsedInvites.map(sanitizeInvite)
-          : makeSeedInvites();
-        setInvites(safeInvites);
+      try {
+        const savedInvites = localStorage.getItem(STORAGE_KEYS.invites);
+        const parsedInvites = savedInvites ? JSON.parse(savedInvites) : [];
+        const safeInvites = Array.isArray(parsedInvites) ? parsedInvites.map(sanitizeInvite) : [];
+        if (!cancelled) setInvites(safeInvites);
         localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(safeInvites));
-      } else {
-        const seed = makeSeedInvites();
-        setInvites(seed);
-        localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(seed));
-      }
 
-      const savedFavorites = localStorage.getItem(STORAGE_KEYS.favorites);
-      if (savedFavorites) {
-        const parsedFavorites = JSON.parse(savedFavorites);
-        setFavorites(Array.isArray(parsedFavorites) ? parsedFavorites : []);
+        const savedFavorites = localStorage.getItem(STORAGE_KEYS.favorites);
+        const parsedFavorites = savedFavorites ? JSON.parse(savedFavorites) : [];
+        if (!cancelled) setFavorites(Array.isArray(parsedFavorites) ? parsedFavorites : []);
+      } catch {
+        if (!cancelled) {
+          setInvites([]);
+          setFavorites([]);
+        }
+        localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify([]));
+        localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify([]));
       }
-    } catch {
-      const seed = makeSeedInvites();
-      setMerchant(defaultMerchant);
-      setInvites(seed);
-      localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(defaultMerchant));
-      localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(seed));
-      setFavorites([]);
-      localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify([]));
     }
+
+    loadMerchantAndLocalData();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -493,10 +577,14 @@ export default function MerchantDashboard() {
     });
   }, [merchant]);
 
+  const isUnlimitedPlan = merchant.monthlyQuota === -1;
+
   const remainingPasses = useMemo(() => {
-    const usedCount = invites.filter((item) => item.status !== "취소").length;
-    return Math.max(merchant.monthlyQuota - usedCount, 0);
-  }, [invites, merchant.monthlyQuota]);
+    if (isUnlimitedPlan) return 999999;
+    const localUsedCount = invites.filter((item) => item.status !== "취소").length;
+    const usedCount = Number(merchant.usedCount ?? localUsedCount);
+    return Math.max(Number(merchant.monthlyQuota || 0) - usedCount, 0);
+  }, [invites, merchant.monthlyQuota, merchant.usedCount, isUnlimitedPlan]);
 
   const remainingPassesRef = useRef(remainingPasses);
   useEffect(() => {
@@ -671,6 +759,11 @@ export default function MerchantDashboard() {
 
     if (!Array.isArray(form.selectedGateIds) || form.selectedGateIds.length === 0) {
       setError("대상 차단기를 1개 이상 선택해 주세요.");
+      return;
+    }
+
+    if (merchant.isActive === false) {
+      setError("비활성화된 계정입니다. 운영자에게 문의해 주세요.");
       return;
     }
 
@@ -868,6 +961,11 @@ export default function MerchantDashboard() {
       return;
     }
 
+    if (merchant.isActive === false) {
+      setError("비활성화된 계정입니다. 운영자에게 문의해 주세요.");
+      return;
+    }
+
     if (remainingPasses <= 0) {
       setError("잔여 주차권이 없습니다. 운영자에게 충전 요청이 필요합니다.");
       return;
@@ -999,13 +1097,13 @@ export default function MerchantDashboard() {
     resetForm();
     setShowHistoryPanel(false);
 
-    setToast("데모 데이터를 초기화했습니다.");
+    setToast("로컬 발행 내역을 초기화했습니다.");
   }
 
   const stats = [
-    { label: "잔여 주차권", value: `${remainingPasses}` },
+    { label: "잔여 주차권", value: isUnlimitedPlan ? "무제한" : `${remainingPasses}` },
     { label: "오늘 발행", value: `${todayIssued}` },
-    { label: "이번 달 한도", value: `${merchant.monthlyQuota}` },
+    { label: "이번 달 한도", value: isUnlimitedPlan ? "무제한" : `${merchant.monthlyQuota}` },
   ];
 
   const quickMenus = [
@@ -1358,7 +1456,7 @@ export default function MerchantDashboard() {
               </div>
 
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                잔여 주차권 {remainingPasses}건
+                잔여 주차권 {isUnlimitedPlan ? "무제한" : `${remainingPasses}건`}
               </span>
             </div>
 
@@ -1391,7 +1489,7 @@ export default function MerchantDashboard() {
                     onChange={(e) => handleChange("usageLimit", e.target.value)}
                     className="min-w-0 w-14 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none focus:border-slate-400"
                   />
-                  <span className="truncate text-[10px] text-slate-500">/{remainingPasses}</span>
+                  <span className="truncate text-[10px] text-slate-500">/{isUnlimitedPlan ? "무제한" : remainingPasses}</span>
                 </div>
               </div>
 
@@ -1641,8 +1739,18 @@ export default function MerchantDashboard() {
                 <span className="font-medium">{merchant.shopName}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">대표자</span>
-                <span className="font-medium">{merchant.ownerName}</span>
+                <span className="text-slate-500">아이디</span>
+                <span className="font-medium">{merchant.email || merchant.ownerName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">호실</span>
+                <span className="font-medium">{merchant.roomNo || "-"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">상태</span>
+                <span className={`font-medium ${merchant.isActive === false ? "text-rose-600" : "text-emerald-700"}`}>
+                  {merchant.isActive === false ? "비활성" : "활성"}
+                </span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="shrink-0 text-slate-500">주소</span>
@@ -1650,7 +1758,7 @@ export default function MerchantDashboard() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">요금제</span>
-                <span className="font-medium">{merchant.pricingName || merchant.planName}</span>
+                <span className="font-medium">{planLabel(merchant.planLimit ?? merchant.monthlyQuota)}</span>
               </div>
             </div>
           </div>
@@ -1664,7 +1772,7 @@ export default function MerchantDashboard() {
                   App.jsx 상단의 API_BASE_URL 또는 VITE_API_BASE_URL 값을 실제 Invoke URL로 바꿔야 합니다.
                 </p>
               ) : (
-                <p className="rounded-2xl bg-emerald-50 px-3 py-2 text-emerald-700">실제 API Gateway 주소가 설정되어 있습니다.</p>
+                <p className="rounded-2xl bg-emerald-50 px-3 py-2 text-emerald-700">실제 API Gateway 주소가 설정되어 있습니다. /merchant/me 조회를 사용합니다.</p>
               )}
             </div>
           </div>

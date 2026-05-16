@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "amazon-cognito-identity-js": "^6.3.16",
     "aws-amplify": "^6.15.7",
     "qrcode": "^1.5.4",
     "react": "^19.2.4",
