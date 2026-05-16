@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { clearSession } from "../auth/auth.js";
+import { fetchAuthSession } from "aws-amplify/auth";
 
 const API_BASE = "https://8q72reoak2.execute-api.ap-northeast-2.amazonaws.com";
 const PLAN_OPTIONS = [100, 200, 300, 400, 500, "unlimited"];
@@ -20,30 +21,15 @@ function formatDate(value) {
   }
 }
 
-function getIdToken() {
-  const directKeys = ["idToken", "accessToken", "parking_id_token", "parking_access_token"];
+async function getIdToken() {
+  const session = await fetchAuthSession();
+  const idToken = session.tokens?.idToken?.toString();
 
-  for (const key of directKeys) {
-    const value = localStorage.getItem(key);
-    if (value) return value;
+  if (!idToken) {
+    throw new Error("로그인 토큰이 없습니다. 다시 로그인해 주세요.");
   }
 
-  // 기존 auth.js가 세션을 JSON으로 저장하는 경우를 대비한 fallback
-  for (const key of Object.keys(localStorage)) {
-    if (!key.toLowerCase().includes("token") && !key.toLowerCase().includes("session")) continue;
-
-    try {
-      const parsed = JSON.parse(localStorage.getItem(key));
-      if (parsed?.idToken) return parsed.idToken;
-      if (parsed?.accessToken) return parsed.accessToken;
-      if (parsed?.tokens?.idToken) return parsed.tokens.idToken;
-      if (parsed?.tokens?.accessToken) return parsed.tokens.accessToken;
-    } catch {
-      // plain string token은 위 directKeys에서 처리
-    }
-  }
-
-  return "";
+  return idToken;
 }
 
 function planLabel(value) {
@@ -74,11 +60,7 @@ export default function AdminDashboard() {
   }, [merchantItems, query]);
 
   async function apiFetch(path, options = {}) {
-    const token = getIdToken();
-
-    if (!token) {
-      throw new Error("로그인 토큰이 없습니다. 다시 로그인해 주세요.");
-    }
+    const token = await getIdToken();
 
     const res = await fetch(`${API_BASE}${path}`, {
       ...options,

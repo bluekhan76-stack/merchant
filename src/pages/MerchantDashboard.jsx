@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { fetchAuthSession } from "aws-amplify/auth";
 
 const STORAGE_KEYS = {
   merchant: "merchant_owner_demo_profile",
@@ -16,29 +17,15 @@ const API_PATHS = {
 };
 
 
-function getIdToken() {
-  const directKeys = ["idToken", "accessToken", "parking_id_token", "parking_access_token"];
+async function getIdToken() {
+  const session = await fetchAuthSession();
+  const idToken = session.tokens?.idToken?.toString();
 
-  for (const key of directKeys) {
-    const value = localStorage.getItem(key);
-    if (value) return value;
+  if (!idToken) {
+    throw new Error("로그인 토큰이 없습니다. 다시 로그인해 주세요.");
   }
 
-  for (const key of Object.keys(localStorage)) {
-    if (!key.toLowerCase().includes("token") && !key.toLowerCase().includes("session")) continue;
-
-    try {
-      const parsed = JSON.parse(localStorage.getItem(key));
-      if (parsed?.idToken) return parsed.idToken;
-      if (parsed?.accessToken) return parsed.accessToken;
-      if (parsed?.tokens?.idToken) return parsed.tokens.idToken;
-      if (parsed?.tokens?.accessToken) return parsed.tokens.accessToken;
-    } catch {
-      // plain string token은 directKeys에서 처리합니다.
-    }
-  }
-
-  return "";
+  return idToken;
 }
 
 function planLabel(planLimit) {
@@ -74,11 +61,7 @@ function mapMerchantFromApi(item) {
 }
 
 async function fetchMerchantMe() {
-  const token = getIdToken();
-
-  if (!token) {
-    throw new Error("로그인 토큰이 없습니다. 다시 로그인해 주세요.");
-  }
+  const token = await getIdToken();
 
   const response = await fetch(`${API_BASE_URL}${API_PATHS.merchantMe}`, {
     method: "GET",
@@ -381,11 +364,13 @@ async function requestParkingPass({
   merchantPhone,
 }) {
   const normalizedPhone = String(phone || "").replace(/\D/g, "");
+  const token = await getIdToken();
+
   const response = await fetch(`${API_BASE_URL}${API_PATHS.requestPass}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(getIdToken() ? { Authorization: `Bearer ${getIdToken()}` } : {}),
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
       phone: normalizedPhone,
