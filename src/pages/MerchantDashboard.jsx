@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { fetchAuthSession } from "aws-amplify/auth";
+import { signOut } from "aws-amplify/auth";
 
 const STORAGE_KEYS = {
   merchant: "merchant_owner_demo_profile",
@@ -16,6 +17,23 @@ const API_PATHS = {
   merchantMe: "/merchant/me",
 };
 
+async function handleLogout() {
+  try {
+    await signOut();
+
+    localStorage.clear();
+    sessionStorage.clear();
+
+    window.location.href = "/login";
+  } catch (err) {
+    console.error(err);
+
+    localStorage.clear();
+    sessionStorage.clear();
+
+    window.location.href = "/login";
+  }
+}
 
 async function getIdToken() {
   const session = await fetchAuthSession();
@@ -1125,6 +1143,7 @@ export default function MerchantDashboard() {
             </button>
             <button
               type="button"
+              onClick={handleLogout}
               className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium leading-tight text-white shadow-sm hover:opacity-90"
             >
               로그<br />아웃
