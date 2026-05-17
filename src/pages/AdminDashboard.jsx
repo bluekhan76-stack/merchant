@@ -385,7 +385,7 @@ export default function AdminDashboard() {
                         <div className="mt-2">
                           <button
                             onClick={() => resetPassword(item.merchantId)}
-                            className="rounded-xl border px-3 py-2 text-xs hover:bg-slate-50"
+                            className="rounded-xl border px-3 py-2 hover:bg-slate-50 text-xs"
                             disabled={loading}
                           >
                             비밀번호 초기화
