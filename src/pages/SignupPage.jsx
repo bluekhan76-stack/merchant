@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { signIn, signUp, fetchAuthSession } from "aws-amplify/auth";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL ||
@@ -25,12 +24,12 @@ export default function SignupPage() {
     event.preventDefault();
     setError("");
 
-    const username = requestedUsername.trim();
+    const loginId = requestedUsername.trim();
     const trimmedPassword = password.trim();
     const trimmedBuildingName = buildingName.trim();
     const trimmedRoomNo = roomNo.trim();
 
-    if (username.length < 4) {
+    if (loginId.length < 4) {
       setError("로그인 ID는 4자 이상 입력해 주세요.");
       return;
     }
@@ -53,38 +52,15 @@ export default function SignupPage() {
     setIsSubmitting(true);
 
     try {
-      // 1) Cognito 사용자 생성
-      await signUp({
-        username,
-        password: trimmedPassword,
-        options: {
-          autoSignIn: false,
-        },
-      });
-
-      // 2) 자동 로그인
-      await signIn({
-        username,
-        password: trimmedPassword,
-      });
-
-      // 3) JWT 토큰 확보
-      const session = await fetchAuthSession();
-      const idToken = session.tokens?.idToken?.toString();
-
-      if (!idToken) {
-        throw new Error("로그인 토큰을 가져오지 못했습니다.");
-      }
-
-      // 4) 가입 신청 정보를 DynamoDB에 저장
-      const res = await fetch(`${API_BASE}/merchant/signup-request`, {
+      const res = await fetch(`${API_BASE}/public/signup`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          loginId: username,
+          loginId,
+          username: loginId,
+          password: trimmedPassword,
           buildingName: trimmedBuildingName,
           roomNo: trimmedRoomNo,
         }),
@@ -93,27 +69,19 @@ export default function SignupPage() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.ok) {
-        setError(data.message || "가입 신청 저장에 실패했습니다.");
+        if (data?.code === "UsernameExistsException") {
+          setError("이미 사용 중인 로그인 ID입니다.");
+        } else {
+          setError(data.message || "가입 신청에 실패했습니다.");
+        }
         return;
       }
 
+      alert("가입 신청이 완료되었습니다. 운영자 승인 후 로그인할 수 있습니다.");
       navigate("/pending", { replace: true });
     } catch (err) {
       console.error(err);
-
-      if (err?.name === "UsernameExistsException") {
-        setError("이미 사용 중인 로그인 ID입니다.");
-      } else if (err?.name === "UserNotConfirmedException") {
-        setError(
-          "Cognito 사용자가 생성되었지만 아직 확인(Confirmed)되지 않았습니다. Cognito에서 자동 Confirm 설정이 필요합니다."
-        );
-      } else if (err?.name === "NotAuthorizedException") {
-        setError("사용자 이름이 없거나 비밀번호가 틀립니다.");
-      } else if (err?.message) {
-        setError(err.message);
-      } else {
-        setError("가입 처리 중 오류가 발생했습니다.");
-      }
+      setError("서버 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
     } finally {
       setIsSubmitting(false);
     }
