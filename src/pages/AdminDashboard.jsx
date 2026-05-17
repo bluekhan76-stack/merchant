@@ -284,7 +284,7 @@ export default function AdminDashboard() {
                 ) : (
                   pendingItems.map((item) => (
                     <tr key={item.merchantId} className="border-b last:border-0">
-                      <td className="py-3 font-semibold">{item.email || item.merchantId}</td>
+                      <td className="py-3 font-semibold">{item.loginId || item.email || item.merchantId}</td>
                       <td>{item.buildingName || "-"}</td>
                       <td>{item.roomNo || "-"}</td>
                       <td>{formatDate(item.createdAt)}</td>
@@ -351,7 +351,7 @@ export default function AdminDashboard() {
                 ) : (
                   filteredMerchants.map((item) => (
                     <tr key={item.merchantId} className="border-b last:border-0">
-                      <td className="py-3 font-semibold">{item.email || item.merchantId}</td>
+                      <td className="py-3 font-semibold">{item.loginId || item.email || item.merchantId}</td>
                       <td>{item.buildingName || "-"}</td>
                       <td>{item.roomNo || "-"}</td>
                       <td>
