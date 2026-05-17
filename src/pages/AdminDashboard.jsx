@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { signOut } from "aws-amplify/auth";
 import { clearSession } from "../auth/auth.js";
 import { fetchAuthSession } from "aws-amplify/auth";
 
@@ -164,10 +165,23 @@ export default function AdminDashboard() {
     }
   }
 
-  const handleLogout = () => {
-    clearSession();
-    navigate("/login", { replace: true });
-  };
+  const handleLogout = async () => {
+  try {
+    await signOut({ global: true });
+  } catch (err) {
+    console.warn("signOut failed", err);
+  }
+
+  clearSession();
+
+  localStorage.removeItem("idToken");
+  localStorage.removeItem("accessToken");
+  localStorage.removeItem("refreshToken");
+  localStorage.removeItem("parking_id_token");
+  localStorage.removeItem("parking_access_token");
+
+  window.location.replace("/login");
+};
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
