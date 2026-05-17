@@ -38,7 +38,7 @@ function mapMerchantFromApi(item) {
   const planLimit = item?.planLimit === "unlimited" ? -1 : Number(item?.planLimit ?? defaultMerchant.monthlyQuota);
   const buildingName = item?.buildingName || item?.shopName || defaultMerchant.shopName;
   const roomNo = item?.roomNo || "";
-  const shopName = roomNo ? `${buildingName} ${roomNo}` : buildingName;
+  const shopName = buildingName;
 
   return {
     ...defaultMerchant,
@@ -1097,24 +1097,6 @@ export default function MerchantDashboard() {
       action: () => setToast("운영자에게 충전 요청을 보냈다고 가정한 데모입니다."),
     },
     {
-      label: "즐겨찾기",
-      action: () => setFavoriteModalOpen(true),
-    },
-    {
-      label: "방문자 이력 확인하기",
-      action: () => {
-        setFilter("all");
-        setShowHistoryPanel(true);
-      },
-    },
-    {
-      label: "만료 내역 보기",
-      action: () => {
-        setFilter("만료");
-        setShowHistoryPanel(true);
-      },
-    },
-    {
       label: "고객센터 문의",
       action: () => setToast("고객센터 연결 기능은 다음 단계에서 추가할 수 있습니다."),
     },
@@ -1168,9 +1150,6 @@ export default function MerchantDashboard() {
               </p>
               <p>
                 <span className="font-medium text-slate-700">유효시간:</span> {displayDuration(pendingPass.durationMinutes)}
-              </p>
-              <p>
-                <span className="font-medium text-slate-700">사용 가능 횟수:</span> {pendingPass.usageLimit}회
               </p>
               <p className="sm:col-span-2">
                 <span className="font-medium text-slate-700">주차권 사용기간:</span> {displayDate(pendingPass.ticketValidFrom)} ~ {displayDate(pendingPass.ticketValidUntil)}
@@ -1266,7 +1245,6 @@ export default function MerchantDashboard() {
               <p><span className="font-medium text-slate-700">상태:</span> 서버 등록 완료</p>
               <p className="sm:col-span-2"><span className="font-medium text-slate-700">대상 차단기:</span> {qrTicket.parkingGateNames.join(", ")}</p>
               <p><span className="font-medium text-slate-700">유효시간:</span> {displayDuration(qrTicket.durationMinutes)}</p>
-              <p><span className="font-medium text-slate-700">사용 가능 횟수:</span> {qrTicket.usageLimit}회</p>
               <p className="sm:col-span-2"><span className="font-medium text-slate-700">주차권 사용기간:</span> {displayDate(qrTicket.ticketValidFrom)} ~ {displayDate(qrTicket.ticketValidUntil)}</p>
             </div>
 
@@ -1353,7 +1331,7 @@ export default function MerchantDashboard() {
           <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-3">
             <p className="text-sm font-semibold text-amber-950">현재 입력된 조건 저장</p>
             <p className="mt-1 text-xs leading-relaxed text-amber-800">
-              유효시간, 사용 횟수, 시작/종료 시간, 대상 차단기를 저장합니다.
+              유효시간, 시작/종료 시간, 대상 차단기를 저장합니다.
             </p>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
               <input
@@ -1391,7 +1369,7 @@ export default function MerchantDashboard() {
                       <div className="min-w-0">
                         <p className="font-semibold text-slate-900">{favorite.name}</p>
                         <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                          유효시간 {displayDuration(favorite.durationMinutes)} · {favorite.usageLimit}회
+                          유효시간 {displayDuration(favorite.durationMinutes)}
                         </p>
                         <p className="mt-1 text-xs leading-relaxed text-slate-500">
                           사용기간 {displayDate(favorite.ticketValidFrom)} ~ {displayDate(favorite.ticketValidUntil)}
@@ -1446,7 +1424,7 @@ export default function MerchantDashboard() {
             </div>
 
             <div className="grid grid-cols-2 gap-1.5">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 col-span-2">
                 <div className="flex items-center gap-1.5">
                   <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">유효</label>
                   <select
@@ -1460,21 +1438,6 @@ export default function MerchantDashboard() {
                       </option>
                     ))}
                   </select>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1">
-                <div className="flex items-center gap-1.5">
-                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">횟수</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max={Math.max(remainingPasses, 1)}
-                    value={form.usageLimit}
-                    onChange={(e) => handleChange("usageLimit", e.target.value)}
-                    className="min-w-0 w-14 rounded-md border bg-white px-1.5 py-1 text-[12px] outline-none focus:border-slate-400"
-                  />
-                  <span className="truncate text-[10px] text-slate-500">/{isUnlimitedPlan ? "무제한" : remainingPasses}</span>
                 </div>
               </div>
 
@@ -1666,7 +1629,6 @@ export default function MerchantDashboard() {
                             <p>상가: {row.shopName}</p>
                             <p>대상 차단기: {row.parkingGateNames.join(", ")}</p>
                             <p>유효시간: {displayDuration(row.durationMinutes)}</p>
-                            <p>사용 가능 횟수: {row.usageLimit}회</p>
                             <p>생성 시각: {displayDate(row.createdAt)}</p>
                             <p className="sm:col-span-2">주차권 사용기간: {displayDate(row.ticketValidFrom)} ~ {displayDate(row.ticketValidUntil)}</p>
                             <p className="sm:col-span-2">메모: {row.memo || "-"}</p>
@@ -1737,28 +1699,10 @@ export default function MerchantDashboard() {
                   {merchant.isActive === false ? "비활성" : "활성"}
                 </span>
               </div>
-              <div className="flex justify-between gap-3">
-                <span className="shrink-0 text-slate-500">주소</span>
-                <span className="text-right font-medium">{merchant.address || "주소 미등록"}</span>
-              </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">요금제</span>
                 <span className="font-medium">{planLabel(merchant.planLimit ?? merchant.monthlyQuota)}</span>
               </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
-            <h2 className="text-lg font-semibold">서버 연동 상태</h2>
-            <div className="mt-4 space-y-2 text-sm">
-              <p className="break-all text-slate-600">API: {API_BASE_URL}</p>
-              {API_BASE_URL.includes("REPLACE_WITH_YOUR_API_ID") ? (
-                <p className="rounded-2xl bg-amber-50 px-3 py-2 text-amber-700">
-                  App.jsx 상단의 API_BASE_URL 또는 VITE_API_BASE_URL 값을 실제 Invoke URL로 바꿔야 합니다.
-                </p>
-              ) : (
-                <p className="rounded-2xl bg-emerald-50 px-3 py-2 text-emerald-700">실제 API Gateway 주소가 설정되어 있습니다. /merchant/me 조회를 사용합니다.</p>
-              )}
             </div>
           </div>
 
