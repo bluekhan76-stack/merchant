@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { signIn, signUp, fetchAuthSession } from "aws-amplify/auth";
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL ||
@@ -52,14 +53,38 @@ export default function SignupPage() {
     setIsSubmitting(true);
 
     try {
-      const res = await fetch(`${API_BASE}/public/signup`, {
+      // 1) Cognito 사용자 생성
+      await signUp({
+        username,
+        password: trimmedPassword,
+        options: {
+          autoSignIn: false,
+        },
+      });
+
+      // 2) 자동 로그인
+      await signIn({
+        username,
+        password: trimmedPassword,
+      });
+
+      // 3) JWT 토큰 확보
+      const session = await fetchAuthSession();
+      const idToken = session.tokens?.idToken?.toString();
+
+      if (!idToken) {
+        throw new Error("로그인 토큰을 가져오지 못했습니다.");
+      }
+
+      // 4) 가입 신청 정보를 DynamoDB에 저장
+      const res = await fetch(`${API_BASE}/merchant/signup-request`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          email: username,
-          password: trimmedPassword,
+          loginId: username,
           buildingName: trimmedBuildingName,
           roomNo: trimmedRoomNo,
         }),
@@ -68,14 +93,27 @@ export default function SignupPage() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok || !data.ok) {
-        setError(data.message || "가입 신청에 실패했습니다.");
+        setError(data.message || "가입 신청 저장에 실패했습니다.");
         return;
       }
 
       navigate("/pending", { replace: true });
     } catch (err) {
       console.error(err);
-      setError("서버 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
+
+      if (err?.name === "UsernameExistsException") {
+        setError("이미 사용 중인 로그인 ID입니다.");
+      } else if (err?.name === "UserNotConfirmedException") {
+        setError(
+          "Cognito 사용자가 생성되었지만 아직 확인(Confirmed)되지 않았습니다. Cognito에서 자동 Confirm 설정이 필요합니다."
+        );
+      } else if (err?.name === "NotAuthorizedException") {
+        setError("사용자 이름이 없거나 비밀번호가 틀립니다.");
+      } else if (err?.message) {
+        setError(err.message);
+      } else {
+        setError("가입 처리 중 오류가 발생했습니다.");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -94,7 +132,9 @@ export default function SignupPage() {
             희망 로그인 ID
             <input
               value={requestedUsername}
-              onChange={(event) => setRequestedUsername(normalizeUsername(event.target.value))}
+              onChange={(event) =>
+                setRequestedUsername(normalizeUsername(event.target.value))
+              }
               className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-slate-900"
               placeholder="예: merchant001"
               autoComplete="username"
