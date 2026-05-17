@@ -566,8 +566,13 @@ export default function MerchantDashboard() {
 
   const remainingPasses = useMemo(() => {
     if (isUnlimitedPlan) return 999999;
+
+    // 서버 usedCount가 아직 화면에 갱신되기 전에도,
+    // 방금 발행한 로컬 발행 내역(invites)을 함께 반영해서 잔여 수량을 즉시 차감한다.
     const localUsedCount = invites.filter((item) => item.status !== "취소").length;
-    const usedCount = Number(merchant.usedCount ?? localUsedCount);
+    const serverUsedCount = Number(merchant.usedCount || 0);
+    const usedCount = Math.max(serverUsedCount, localUsedCount);
+
     return Math.max(Number(merchant.monthlyQuota || 0) - usedCount, 0);
   }, [invites, merchant.monthlyQuota, merchant.usedCount, isUnlimitedPlan]);
 
