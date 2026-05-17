@@ -90,7 +90,7 @@ export default function SignupPage() {
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-10 text-slate-950">
       <div className="mx-auto max-w-xl rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
-        <h1 className="text-2xl font-bold">상가 회원가입 신청</h1>
+        <h1 className="text-2xl font-bold">회원가입 신청</h1>
         <p className="mt-2 text-sm text-slate-600">
           가입 신청 후 운영자 승인 완료 시 주차권 발행 기능을 사용할 수 있습니다.
         </p>

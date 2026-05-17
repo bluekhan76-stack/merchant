@@ -53,7 +53,6 @@ export default function AdminDashboard() {
 
     return merchantItems.filter((item) => {
       return (
-        String(item.loginId || "").toLowerCase().includes(q) ||
         String(item.email || "").toLowerCase().includes(q) ||
         String(item.buildingName || "").toLowerCase().includes(q) ||
         String(item.roomNo || "").toLowerCase().includes(q)
@@ -166,6 +165,41 @@ export default function AdminDashboard() {
     }
   }
 
+
+  async function resetPassword(merchantId) {
+    const newPassword = window.prompt(
+      "새 비밀번호를 입력하세요. 최소 8자 이상"
+    );
+
+    if (!newPassword) return;
+
+    if (newPassword.length < 8) {
+      alert("비밀번호는 최소 8자 이상이어야 합니다.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      await apiFetch(
+        `/admin/merchants/${encodeURIComponent(
+          merchantId
+        )}/reset-password`,
+        {
+          method: "POST",
+          body: JSON.stringify({ newPassword }),
+        }
+      );
+
+      alert("비밀번호가 초기화되었습니다.");
+    } catch (err) {
+      console.error(err);
+      alert(err.message || "비밀번호 초기화 실패");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const handleLogout = async () => {
   try {
     await signOut({ global: true });
@@ -250,7 +284,7 @@ export default function AdminDashboard() {
                 ) : (
                   pendingItems.map((item) => (
                     <tr key={item.merchantId} className="border-b last:border-0">
-                      <td className="py-3 font-semibold">{item.loginId || item.email || item.merchantId}</td>
+                      <td className="py-3 font-semibold">{item.email || item.merchantId}</td>
                       <td>{item.buildingName || "-"}</td>
                       <td>{item.roomNo || "-"}</td>
                       <td>{formatDate(item.createdAt)}</td>
@@ -317,7 +351,7 @@ export default function AdminDashboard() {
                 ) : (
                   filteredMerchants.map((item) => (
                     <tr key={item.merchantId} className="border-b last:border-0">
-                      <td className="py-3 font-semibold">{item.loginId || item.email || item.merchantId}</td>
+                      <td className="py-3 font-semibold">{item.email || item.merchantId}</td>
                       <td>{item.buildingName || "-"}</td>
                       <td>{item.roomNo || "-"}</td>
                       <td>
@@ -347,6 +381,16 @@ export default function AdminDashboard() {
                           />
                           <span>{item.isActive ? "활성화" : "비활성화"}</span>
                         </label>
+
+                        <div className="mt-2">
+                          <button
+                            onClick={() => resetPassword(item.merchantId)}
+                            className="rounded-xl border px-3 py-2 text-xs hover:bg-slate-50"
+                            disabled={loading}
+                          >
+                            비밀번호 초기화
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
