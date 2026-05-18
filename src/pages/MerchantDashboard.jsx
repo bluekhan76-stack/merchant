@@ -1711,7 +1711,7 @@ export default function MerchantDashboard() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">아이디</span>
-                <span className="font-medium">{merchant.merchantId || merchant.loginId || merchant.email || merchant.ownerName}</span>
+                <span className="font-medium">{merchant.loginId || merchant.email || merchant.ownerName}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">호실</span>
