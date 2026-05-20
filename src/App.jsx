@@ -15,7 +15,8 @@ function RequireAuth({ allowedRoles, children }) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
-
+  // 승인 대기 상태여도 /pending 으로 보내지 않습니다.
+  // QR/주차권 발행 제한은 MerchantDashboard에서 status/isActive 기준으로 처리합니다.
   if (Array.isArray(allowedRoles) && !allowedRoles.includes(session.role)) {
     const fallback = session.role === ROLES.ADMIN ? "/admin" : "/merchant";
     return <Navigate to={fallback} replace />;
@@ -24,13 +25,16 @@ function RequireAuth({ allowedRoles, children }) {
   return children;
 }
 
-function HomeRedirect() {
-  const session = getSession();
+function RootPage() {
   const searchCode = new URLSearchParams(window.location.search).get("code");
 
-  if (searchCode) return <OpenBridgePage />;
-  if (!session?.isAuthenticated) return <Navigate to="/login" replace />;
-  return <Navigate to={session.role === ROLES.ADMIN ? "/admin" : "/merchant"} replace />;
+  if (searchCode) {
+    return <OpenBridgePage />;
+  }
+
+  // 기존에는 로그인 세션이 있으면 자동으로 /merchant 또는 /admin 으로 이동했습니다.
+  // 이 자동 이동 때문에 빈 화면/리다이렉트 충돌이 발생할 수 있어 루트는 항상 로그인 화면으로 둡니다.
+  return <LoginPage />;
 }
 
 function AuthSync() {
@@ -50,7 +54,7 @@ export default function App() {
     <BrowserRouter>
       <AuthSync />
       <Routes>
-        <Route path="/" element={<HomeRedirect />} />
+        <Route path="/" element={<RootPage />} />
         <Route path="/open" element={<OpenBridgePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
