@@ -1247,7 +1247,10 @@ export default function MerchantDashboard() {
             <h1 className="text-xl font-bold sm:text-2xl">{merchant.shopName}</h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="whitespace-nowrap rounded-2xl bg-white px-3 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+              고객센터 : <span className="font-black text-slate-950">1533 3302</span>
+            </div>
             <button
               onClick={resetDemoData}
               className="rounded-2xl border px-4 py-2 text-sm font-medium leading-tight shadow-sm hover:bg-slate-50"
@@ -1860,7 +1863,7 @@ export default function MerchantDashboard() {
             </div>
           </div>
 
-          <div className="rounded-2xl bg-white px-4 py-3 text-center shadow-sm ring-1 ring-slate-200">
+          <div className="rounded-2xl bg-white px-4 py-4 text-center shadow-sm ring-1 ring-slate-200">
             <p className="text-4xl font-black tracking-tight text-blue-700 sm:text-5xl">
               D-{rechargeDday}
             </p>
