@@ -185,6 +185,101 @@ function displayDate(isoString) {
   }).format(d);
 }
 
+
+function addMonthsClamped(date, months) {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const day = d.getDate();
+  const next = new Date(d);
+  next.setMonth(next.getMonth() + months);
+
+  // 월말 날짜 보정: 1/31 + 1개월 같은 경우 다음 달 말일로 맞춥니다.
+  if (next.getDate() !== day) {
+    next.setDate(0);
+  }
+
+  return next;
+}
+
+function getMerchantApprovedDate(merchant) {
+  const raw =
+    merchant?.approvedAt ||
+    merchant?.approvedDate ||
+    merchant?.approvalDate ||
+    merchant?.joinedAt ||
+    merchant?.joinedDate ||
+    merchant?.registeredAt ||
+    merchant?.createdAt ||
+    merchant?.createdDate ||
+    merchant?.signupAt ||
+    merchant?.signupDate ||
+    "";
+
+  const date = raw ? new Date(raw) : null;
+  if (date && !Number.isNaN(date.getTime())) return date;
+
+  return new Date();
+}
+
+function getBillingCycle(merchant) {
+  const baseDate = getMerchantApprovedDate(merchant);
+  const now = new Date();
+
+  let start = new Date(baseDate);
+  let end = addMonthsClamped(start, 1);
+
+  while (end && now.getTime() >= end.getTime()) {
+    start = new Date(end);
+    end = addMonthsClamped(start, 1);
+  }
+
+  return {
+    start,
+    end: end || addMonthsClamped(now, 1) || now,
+  };
+}
+
+function displayDateOnly(date) {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return "-";
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+function displayBillingPeriod(cycle) {
+  if (!cycle?.start || !cycle?.end) return "-";
+  return `${displayDateOnly(cycle.start)} ~ ${displayDateOnly(cycle.end)}`;
+}
+
+function daysUntilCycleEnd(cycle) {
+  if (!cycle?.end) return 0;
+
+  const now = new Date();
+  const end = new Date(cycle.end);
+  if (Number.isNaN(end.getTime())) return 0;
+
+  const diff = end.getTime() - now.getTime();
+  return Math.max(Math.ceil(diff / (1000 * 60 * 60 * 24)), 0);
+}
+
+function merchantAccountText(merchant) {
+  const bankName = merchant?.bankName || merchant?.bank || "";
+  const accountNumber = merchant?.accountNumber || merchant?.bankAccount || merchant?.accountNo || "";
+  const accountHolder = merchant?.accountHolder || merchant?.depositor || merchant?.ownerName || "";
+
+  if (bankName || accountNumber) {
+    return `${bankName ? `${bankName} ` : ""}${accountNumber || ""}${accountHolder ? ` / 예금주 ${accountHolder}` : ""}`.trim();
+  }
+
+  return "계좌번호: 관리자에게 문의";
+}
+
+
 function displayDuration(minutes) {
   const value = Number(minutes || 0);
   if (value % 1440 === 0) return `${value / 1440}일`;
@@ -584,17 +679,30 @@ export default function MerchantDashboard() {
 
   const isUnlimitedPlan = merchant.monthlyQuota === -1;
 
+  const billingCycle = useMemo(() => getBillingCycle(merchant), [merchant]);
+  const billingPeriodText = useMemo(() => displayBillingPeriod(billingCycle), [billingCycle]);
+  const rechargeDday = useMemo(() => daysUntilCycleEnd(billingCycle), [billingCycle]);
+  const accountText = useMemo(() => merchantAccountText(merchant), [merchant]);
+
   const remainingPasses = useMemo(() => {
     if (isUnlimitedPlan) return 999999;
 
-    // 서버 usedCount가 아직 화면에 갱신되기 전에도,
-    // 방금 발행한 로컬 발행 내역(invites)을 함께 반영해서 잔여 수량을 즉시 차감한다.
-    const localUsedCount = invites.filter((item) => item.status !== "취소").length;
+    // 승인일 기준 1개월 주기로 사용량을 계산합니다.
+    // 다음 주기가 되면 로컬 발행 내역 기준 잔여 수량은 자동으로 월 한도만큼 복구됩니다.
+    const cycleStartTime = billingCycle.start?.getTime?.() || 0;
+    const cycleEndTime = billingCycle.end?.getTime?.() || Number.MAX_SAFE_INTEGER;
+    const localUsedCount = invites.filter((item) => {
+      if (item.status === "취소") return false;
+      const createdAt = new Date(item.createdAt).getTime();
+      if (Number.isNaN(createdAt)) return false;
+      return createdAt >= cycleStartTime && createdAt < cycleEndTime;
+    }).length;
+
     const serverUsedCount = Number(merchant.usedCount || 0);
     const usedCount = Math.max(serverUsedCount, localUsedCount);
 
     return Math.max(Number(merchant.monthlyQuota || 0) - usedCount, 0);
-  }, [invites, merchant.monthlyQuota, merchant.usedCount, isUnlimitedPlan]);
+  }, [invites, merchant.monthlyQuota, merchant.usedCount, isUnlimitedPlan, billingCycle]);
 
   const remainingPassesRef = useRef(remainingPasses);
   useEffect(() => {
@@ -1137,16 +1245,6 @@ export default function MerchantDashboard() {
     { label: "이번 달 한도", value: isUnlimitedPlan ? "무제한" : `${merchant.monthlyQuota}` },
   ];
 
-  const quickMenus = [
-    {
-      label: "잔여 주차권 충전 요청",
-      action: () => setToast("운영자에게 충전 요청을 보냈다고 가정한 데모입니다."),
-    },
-    {
-      label: "고객센터 문의",
-      action: () => setToast("고객센터 연결 기능은 다음 단계에서 추가할 수 있습니다."),
-    },
-  ];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -1154,7 +1252,7 @@ export default function MerchantDashboard() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div>
             <p className="text-sm text-slate-500">방문자 주차권 시스템</p>
-            <h1 className="text-xl font-bold sm:text-2xl">{merchant.shopName} 주차 방문 관리</h1>
+            <h1 className="text-xl font-bold sm:text-2xl">{merchant.shopName}</h1>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1754,6 +1852,10 @@ export default function MerchantDashboard() {
                   {merchant.isActive === false ? "비활성" : "활성"}
                 </span>
               </div>
+              <div className="flex justify-between gap-4">
+                <span className="shrink-0 text-slate-500">사용 기간</span>
+                <span className="text-right font-medium">{billingPeriodText}</span>
+              </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">요금제</span>
                 <span className="font-medium">{planLabel(merchant.planLimit ?? merchant.monthlyQuota)}</span>
@@ -1761,19 +1863,22 @@ export default function MerchantDashboard() {
             </div>
           </div>
 
-          <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
-            <h2 className="text-lg font-semibold">빠른 메뉴</h2>
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              {quickMenus.map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={item.action}
-                  className="rounded-2xl border px-4 py-4 text-sm font-medium hover:bg-slate-50"
-                >
-                  {item.label}
-                </button>
-              ))}
+          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5">
+            <h2 className="text-lg font-semibold">이용 기간</h2>
+
+            <div className="mt-5 flex min-h-[150px] flex-col items-center justify-center rounded-2xl bg-slate-50 px-4 py-6 text-center ring-1 ring-slate-100">
+              <p className="text-xs font-medium text-slate-500">다음 자동 충전까지</p>
+              <p className="mt-2 text-6xl font-black tracking-tight text-slate-900 sm:text-7xl">
+                D-{rechargeDday}
+              </p>
+              <p className="mt-3 text-xs text-slate-500">
+                {billingPeriodText}
+              </p>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center">
+              <p className="text-xs font-semibold text-slate-500">계좌번호</p>
+              <p className="mt-1 break-words text-sm font-semibold text-slate-900">{accountText}</p>
             </div>
           </div>
         </aside>
