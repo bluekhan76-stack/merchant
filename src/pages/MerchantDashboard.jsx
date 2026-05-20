@@ -1247,13 +1247,16 @@ export default function MerchantDashboard() {
             <h1 className="text-xl font-bold sm:text-2xl">{merchant.shopName}</h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={resetDemoData}
               className="rounded-2xl border px-4 py-2 text-sm font-medium leading-tight shadow-sm hover:bg-slate-50"
             >
               데모<br />초기화
             </button>
+            <div className="hidden whitespace-nowrap rounded-2xl bg-white px-3 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200 sm:block">
+              고객센터 : <span className="font-black text-slate-950">1533 3302</span>
+            </div>
             <button
               type="button"
               onClick={handleLogout}
@@ -1827,7 +1830,7 @@ export default function MerchantDashboard() {
           ) : null}
         </section>
 
-        <aside className="space-y-6 lg:col-span-4">
+        <aside className="space-y-4 lg:col-span-4">
           <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
             <h2 className="text-lg font-semibold">상가 정보</h2>
             <div className="mt-4 space-y-3 text-sm">
@@ -1860,12 +1863,12 @@ export default function MerchantDashboard() {
             </div>
           </div>
 
-          <div className="rounded-2xl bg-white px-4 py-3 text-center shadow-sm ring-1 ring-slate-200">
-            <p className="text-4xl font-black tracking-tight text-blue-700 sm:text-5xl">
+          <div className="flex min-h-[232px] flex-col items-center justify-center rounded-2xl bg-white px-4 py-5 text-center shadow-sm ring-1 ring-slate-200 lg:min-h-[236px]">
+            <p className="text-5xl font-black tracking-tight text-blue-700 sm:text-6xl">
               D-{rechargeDday}
             </p>
-            <div className="mx-auto mt-3 h-px max-w-xs bg-slate-200" />
-            <p className="mt-3 break-words text-sm font-semibold text-slate-900">
+            <div className="mx-auto mt-5 h-px w-full max-w-xs bg-slate-200" />
+            <p className="mt-4 break-words text-base font-semibold text-slate-900">
               {accountText}
             </p>
           </div>
