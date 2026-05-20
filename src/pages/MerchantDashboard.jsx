@@ -267,16 +267,8 @@ function daysUntilCycleEnd(cycle) {
   return Math.max(Math.ceil(diff / (1000 * 60 * 60 * 24)), 0);
 }
 
-function merchantAccountText(merchant) {
-  const bankName = merchant?.bankName || merchant?.bank || "";
-  const accountNumber = merchant?.accountNumber || merchant?.bankAccount || merchant?.accountNo || "";
-  const accountHolder = merchant?.accountHolder || merchant?.depositor || merchant?.ownerName || "";
-
-  if (bankName || accountNumber) {
-    return `${bankName ? `${bankName} ` : ""}${accountNumber || ""}${accountHolder ? ` / 예금주 ${accountHolder}` : ""}`.trim();
-  }
-
-  return "계좌번호: 관리자에게 문의";
+function merchantAccountText() {
+  return "신한은행 xxx-xx-xxxxxxx";
 }
 
 
@@ -1563,9 +1555,14 @@ export default function MerchantDashboard() {
                 </p>
               </div>
 
-              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                잔여 주차권 {isUnlimitedPlan ? "무제한" : `${remainingPasses}건`}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                  D-{rechargeDday}
+                </span>
+                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                  잔여 주차권 {isUnlimitedPlan ? "무제한" : `${remainingPasses}건`}
+                </span>
+              </div>
             </div>
 
             {!canIssueParkingPass ? (
@@ -1863,23 +1860,14 @@ export default function MerchantDashboard() {
             </div>
           </div>
 
-          <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5">
-            <h2 className="text-lg font-semibold">이용 기간</h2>
-
-            <div className="mt-5 flex min-h-[150px] flex-col items-center justify-center rounded-2xl bg-slate-50 px-4 py-6 text-center ring-1 ring-slate-100">
-              <p className="text-xs font-medium text-slate-500">다음 자동 충전까지</p>
-              <p className="mt-2 text-6xl font-black tracking-tight text-slate-900 sm:text-7xl">
-                D-{rechargeDday}
-              </p>
-              <p className="mt-3 text-xs text-slate-500">
-                {billingPeriodText}
-              </p>
-            </div>
-
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center">
-              <p className="text-xs font-semibold text-slate-500">계좌번호</p>
-              <p className="mt-1 break-words text-sm font-semibold text-slate-900">{accountText}</p>
-            </div>
+          <div className="rounded-2xl bg-white px-4 py-3 text-center shadow-sm ring-1 ring-slate-200">
+            <p className="text-4xl font-black tracking-tight text-blue-700 sm:text-5xl">
+              D-{rechargeDday}
+            </p>
+            <div className="mx-auto mt-3 h-px max-w-xs bg-slate-200" />
+            <p className="mt-3 break-words text-sm font-semibold text-slate-900">
+              {accountText}
+            </p>
           </div>
         </aside>
       </main>
