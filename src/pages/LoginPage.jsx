@@ -21,7 +21,9 @@ export default function LoginPage() {
     } else if (session.role === ROLES.MERCHANT) {
       navigate("/merchant", { replace: true });
     } else {
-      navigate("/pending", { replace: true });
+      // 승인 전 상가회원도 로그인은 허용하고 상가 화면으로 이동합니다.
+      // 주차권/QR 발행 제한은 MerchantDashboard에서 status/isActive 기준으로 처리합니다.
+      navigate("/merchant", { replace: true });
     }
   };
 
@@ -43,7 +45,9 @@ export default function LoginPage() {
       return ROLES.MERCHANT;
     }
 
-    return "PENDING";
+    // Cognito 그룹이 아직 없더라도 로그인은 허용합니다.
+    // 승인 전 발행 제한은 /merchant/me 의 merchant.status 값으로 처리합니다.
+    return ROLES.MERCHANT;
   };
 
   useEffect(() => {
@@ -60,7 +64,7 @@ export default function LoginPage() {
         } else if (role === ROLES.MERCHANT) {
           navigate("/merchant", { replace: true });
         } else if (role === "PENDING") {
-          navigate("/pending", { replace: true });
+          navigate("/merchant", { replace: true });
         }
       } catch (err) {
         // 세션이 없거나 만료된 상태는 정상입니다. 로그인 화면을 그대로 보여줍니다.

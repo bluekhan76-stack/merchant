@@ -77,8 +77,8 @@ export default function SignupPage() {
         return;
       }
 
-      alert("가입 신청이 완료되었습니다. 운영자 승인 후 로그인할 수 있습니다.");
-      navigate("/pending", { replace: true });
+      alert("가입 신청이 완료되었습니다. 바로 로그인할 수 있습니다. 단, QR Code/주차권 발행은 운영자 승인 후 가능합니다.");
+      navigate("/login", { replace: true });
     } catch (err) {
       console.error(err);
       setError("서버 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.");
@@ -92,7 +92,7 @@ export default function SignupPage() {
       <div className="mx-auto max-w-xl rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
         <h1 className="text-2xl font-bold">회원가입 신청</h1>
         <p className="mt-2 text-sm text-slate-600">
-          가입 신청 후 운영자 승인 완료 시 주차권 발행 기능을 사용할 수 있습니다.
+          가입 신청 후 바로 로그인할 수 있습니다. QR Code/주차권 발행은 운영자 승인 완료 후 사용할 수 있습니다.
         </p>
 
         <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>

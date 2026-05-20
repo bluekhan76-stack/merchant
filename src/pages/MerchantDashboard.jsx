@@ -73,7 +73,7 @@ function mapMerchantFromApi(item) {
     monthlyQuota: planLimit,
     usedCount: Number(item?.usedCount || 0),
     isActive: item?.isActive !== false,
-    status: item?.status || "approved",
+    status: item?.status || "pending",
     parkingGates: defaultMerchant.parkingGates,
   };
 }
@@ -126,6 +126,8 @@ const defaultMerchant = {
   address: "수원시 영통구 예시로 123",
   planName: "월 300건",
   monthlyQuota: 300,
+  status: "pending",
+  isActive: true,
   parkingGates: BARRIER_OPTIONS,
 };
 
@@ -599,6 +601,9 @@ export default function MerchantDashboard() {
     remainingPassesRef.current = remainingPasses;
   }, [remainingPasses]);
 
+  const isMerchantApproved = merchant.status === "approved";
+  const canIssueParkingPass = isMerchantApproved && merchant.isActive !== false;
+
   useEffect(() => {
     setForm((prev) => ({
       ...prev,
@@ -764,6 +769,15 @@ export default function MerchantDashboard() {
   function handleOpenConfirm(event) {
     event.preventDefault();
     setError("");
+
+    if (!canIssueParkingPass) {
+      setError(
+        merchant.isActive === false
+          ? "비활성화된 계정입니다. 운영자에게 문의해 주세요."
+          : "운영자 승인 전에는 QR Code/주차권을 발행할 수 없습니다."
+      );
+      return;
+    }
 
     if (!Array.isArray(form.selectedGateIds) || form.selectedGateIds.length === 0) {
       setError("대상 차단기를 1개 이상 선택해 주세요.");
@@ -963,6 +977,15 @@ export default function MerchantDashboard() {
 
   async function handleIssueQrPass() {
     setError("");
+
+    if (!canIssueParkingPass) {
+      setError(
+        merchant.isActive === false
+          ? "비활성화된 계정입니다. 운영자에게 문의해 주세요."
+          : "운영자 승인 전에는 QR Code/주차권을 발행할 수 없습니다."
+      );
+      return;
+    }
 
     if (!Array.isArray(form.selectedGateIds) || form.selectedGateIds.length === 0) {
       setError("대상 차단기를 1개 이상 선택해 주세요.");
@@ -1314,10 +1337,10 @@ export default function MerchantDashboard() {
               <button
                 type="button"
                 onClick={handleIssueQrPass}
-                disabled={qrBusy}
+                disabled={qrBusy || !canIssueParkingPass}
                 className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {qrBusy ? "발행 중..." : "새 QR 발행"}
+                {qrBusy ? "발행 중..." : canIssueParkingPass ? "새 QR 발행" : "승인 후 발행 가능"}
               </button>
               <button
                 type="button"
@@ -1446,6 +1469,13 @@ export default function MerchantDashboard() {
                 잔여 주차권 {isUnlimitedPlan ? "무제한" : `${remainingPasses}건`}
               </span>
             </div>
+
+            {!canIssueParkingPass ? (
+              <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                <p className="font-semibold">운영자 승인 대기 중입니다.</p>
+                <p className="mt-1">로그인은 가능하지만, 승인 전에는 QR Code/주차권 발행이 제한됩니다.</p>
+              </div>
+            ) : null}
 
             <div className="grid grid-cols-2 gap-1.5">
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 col-span-2">
@@ -1582,17 +1612,18 @@ export default function MerchantDashboard() {
             <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="submit"
-                className="flex w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-3 text-[15px] font-semibold text-white shadow-sm hover:opacity-90 sm:py-3.5"
+                disabled={!canIssueParkingPass}
+                className="flex w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-3 text-[15px] font-semibold text-white shadow-sm hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:py-3.5"
               >
-                초대 코드 발행
+                {canIssueParkingPass ? "초대 코드 발행" : "승인 후 발행 가능"}
               </button>
               <button
                 type="button"
                 onClick={handleIssueQrPass}
-                disabled={qrBusy}
+                disabled={qrBusy || !canIssueParkingPass}
                 className="flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-[15px] font-semibold text-slate-900 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:py-3.5"
               >
-                {qrBusy ? "QR 서버 등록 중..." : "QR Code 발행"}
+                {qrBusy ? "QR 서버 등록 중..." : canIssueParkingPass ? "QR Code 발행" : "승인 후 발행 가능"}
               </button>
             </div>
           </form>
