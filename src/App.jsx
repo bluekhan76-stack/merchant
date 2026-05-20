@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import OpenBridgePage from "./OpenBridgePage.jsx";
-import { clearSession, getSession, ROLES } from "./auth/auth.js";
+import { getSession, ROLES } from "./auth/auth.js";
 import AdminDashboard from "./pages/AdminDashboard.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import MerchantDashboard from "./pages/MerchantDashboard.jsx";
-import PendingPage from "./pages/PendingPage.jsx";
 import SignupPage from "./pages/SignupPage.jsx";
 
 function RequireAuth({ allowedRoles, children }) {
@@ -16,9 +15,6 @@ function RequireAuth({ allowedRoles, children }) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 
-  if (session.status === "PENDING") {
-    return <Navigate to="/pending" replace />;
-  }
 
   if (Array.isArray(allowedRoles) && !allowedRoles.includes(session.role)) {
     const fallback = session.role === ROLES.ADMIN ? "/admin" : "/merchant";
@@ -34,7 +30,6 @@ function HomeRedirect() {
 
   if (searchCode) return <OpenBridgePage />;
   if (!session?.isAuthenticated) return <Navigate to="/login" replace />;
-  if (session.status === "PENDING") return <Navigate to="/pending" replace />;
   return <Navigate to={session.role === ROLES.ADMIN ? "/admin" : "/merchant"} replace />;
 }
 
@@ -59,7 +54,6 @@ export default function App() {
         <Route path="/open" element={<OpenBridgePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
-        <Route path="/pending" element={<PendingPage />} />
         <Route
           path="/merchant"
           element={

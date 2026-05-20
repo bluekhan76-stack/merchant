@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { fetchAuthSession, signOut } from "aws-amplify/auth";
+import { signOut } from "aws-amplify/auth";
 import { completeNewPassword, login, LOGIN_CHALLENGES, ROLES } from "../auth/auth.js";
 
 export default function LoginPage() {
@@ -27,60 +27,12 @@ export default function LoginPage() {
     }
   };
 
-  const getRoleFromSession = async () => {
-    const session = await fetchAuthSession();
-    const idToken = session.tokens?.idToken;
-
-    if (!idToken) {
-      return null;
-    }
-
-    const groups = idToken.payload?.["cognito:groups"] || [];
-
-    if (groups.includes(ROLES.ADMIN)) {
-      return ROLES.ADMIN;
-    }
-
-    if (groups.includes(ROLES.MERCHANT)) {
-      return ROLES.MERCHANT;
-    }
-
-    // Cognito 그룹이 아직 없더라도 로그인은 허용합니다.
-    // 승인 전 발행 제한은 /merchant/me 의 merchant.status 값으로 처리합니다.
-    return ROLES.MERCHANT;
-  };
-
   useEffect(() => {
-    let isMounted = true;
-
-    async function checkExistingSession() {
-      try {
-        const role = await getRoleFromSession();
-
-        if (!isMounted) return;
-
-        if (role === ROLES.ADMIN) {
-          navigate("/admin", { replace: true });
-        } else if (role === ROLES.MERCHANT) {
-          navigate("/merchant", { replace: true });
-        } else if (role === "PENDING") {
-          navigate("/merchant", { replace: true });
-        }
-      } catch (err) {
-        // 세션이 없거나 만료된 상태는 정상입니다. 로그인 화면을 그대로 보여줍니다.
-      } finally {
-        if (isMounted) {
-          setCheckingSession(false);
-        }
-      }
-    }
-
-    checkExistingSession();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [navigate]);
+    // 기존 Cognito 세션을 자동으로 /merchant로 보내던 로직을 제거했습니다.
+    // App.jsx의 getSession() 인증 검사와 충돌하여 빈 화면/무한 리다이렉트가 발생할 수 있습니다.
+    // 사용자는 항상 로그인 화면에서 명시적으로 로그인하도록 합니다.
+    setCheckingSession(false);
+  }, []);
 
   const clearLegacyDemoSession = () => {
     // 이전 데모 로그인 코드에서 남겨둔 값이 있으면 제거합니다.
