@@ -46,6 +46,7 @@ export default function AdminDashboard() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [additionalPassInputs, setAdditionalPassInputs] = useState({});
 
   const filteredMerchants = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -150,6 +151,25 @@ export default function AdminDashboard() {
     }
   }
 
+  async function addAdditionalPasses(merchant) {
+    const rawValue = additionalPassInputs[merchant.merchantId] || "";
+    const addCount = Math.floor(Number(rawValue));
+
+    if (!Number.isFinite(addCount) || addCount <= 0) {
+      alert("추가할 주차권 수량을 1 이상으로 입력해 주세요.");
+      return;
+    }
+
+    const currentAdditionalPasses = Number(merchant.additionalPasses || merchant.extraPasses || 0);
+    const nextAdditionalPasses = currentAdditionalPasses + addCount;
+
+    if (!window.confirm(`${addCount}건을 추가하시겠습니까?`)) return;
+
+    await updateMerchant(merchant.merchantId, { additionalPasses: nextAdditionalPasses });
+    setAdditionalPassInputs((prev) => ({ ...prev, [merchant.merchantId]: "" }));
+    alert("추가 주차권이 반영되었습니다.");
+  }
+
   async function updateMerchant(merchantId, patch) {
     try {
       setLoading(true);
@@ -243,7 +263,7 @@ export default function AdminDashboard() {
               <tbody>
                 {pendingItems.length === 0 ? (
                   <tr>
-                    <td colSpan="6" className="py-6 text-center text-slate-500">
+                    <td colSpan="7" className="py-6 text-center text-slate-500">
                       가입 신청 내역이 없습니다.
                     </td>
                   </tr>
@@ -296,7 +316,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table className="w-full min-w-[1100px] text-left text-sm">
               <thead className="border-b text-slate-500">
                 <tr>
                   <th className="py-3">아이디</th>
@@ -304,13 +324,14 @@ export default function AdminDashboard() {
                   <th>호실</th>
                   <th>요금제</th>
                   <th>사용 횟수</th>
+                  <th>추가 주차권</th>
                   <th>활성화</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredMerchants.length === 0 ? (
                   <tr>
-                    <td colSpan="6" className="py-6 text-center text-slate-500">
+                    <td colSpan="7" className="py-6 text-center text-slate-500">
                       가입된 사용자가 없습니다.
                     </td>
                   </tr>
@@ -323,7 +344,13 @@ export default function AdminDashboard() {
                       <td>
                         <select
                           value={item.planLimit === -1 ? "unlimited" : item.planLimit}
-                          onChange={(e) => updateMerchant(item.merchantId, { planLimit: e.target.value })}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            updateMerchant(item.merchantId, {
+                              planLimit: value,
+                              monthlyQuota: value === "unlimited" ? -1 : Number(value),
+                            });
+                          }}
                           className="rounded-xl border px-3 py-2"
                           disabled={loading}
                         >
@@ -336,6 +363,35 @@ export default function AdminDashboard() {
                       </td>
                       <td>
                         {item.usedCount || 0} / {planLabel(item.planLimit)}
+                      </td>
+                      <td className="py-3">
+                        <div className="flex items-center gap-2 whitespace-nowrap">
+                          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                            보유 {Number(item.additionalPasses || item.extraPasses || 0)}건
+                          </span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={additionalPassInputs[item.merchantId] || ""}
+                            onChange={(e) =>
+                              setAdditionalPassInputs((prev) => ({
+                                ...prev,
+                                [item.merchantId]: e.target.value,
+                              }))
+                            }
+                            placeholder="추가 수량"
+                            className="w-24 rounded-xl border px-3 py-2 text-xs"
+                            disabled={loading}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => addAdditionalPasses(item)}
+                            className="rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                            disabled={loading}
+                          >
+                            추가
+                          </button>
+                        </div>
                       </td>
                       <td className="py-3">
                         <div className="flex items-center gap-3 whitespace-nowrap">
