@@ -53,7 +53,7 @@ function planLabel(planLimit) {
 }
 
 function mapMerchantFromApi(item) {
-  const planLimit = item?.planLimit === "unlimited" ? -1 : Number(item?.planLimit ?? item?.monthlyQuota ?? defaultMerchant.monthlyQuota);
+  const planLimit = item?.planLimit === "unlimited" ? -1 : Number(item?.planLimit ?? defaultMerchant.monthlyQuota);
   const buildingName = item?.buildingName || item?.shopName || defaultMerchant.shopName;
   const roomNo = item?.roomNo || "";
   const shopName = buildingName;
@@ -70,9 +70,8 @@ function mapMerchantFromApi(item) {
     address: item?.address || buildingName,
     planLimit,
     planName: planLabel(planLimit),
-    monthlyQuota: item?.monthlyQuota === -1 || item?.monthlyQuota === "unlimited" ? -1 : Number(item?.monthlyQuota ?? planLimit),
+    monthlyQuota: planLimit,
     usedCount: Number(item?.usedCount || 0),
-    additionalPasses: Number(item?.additionalPasses || item?.extraPasses || 0),
     isActive: item?.isActive !== false,
     status: item?.status || "pending",
     parkingGates: defaultMerchant.parkingGates,
@@ -677,44 +676,25 @@ export default function MerchantDashboard() {
   const rechargeDday = useMemo(() => daysUntilCycleEnd(billingCycle), [billingCycle]);
   const accountText = useMemo(() => merchantAccountText(merchant), [merchant]);
 
-  const monthlyUsedCount = useMemo(() => {
-    const cycleStartTime = billingCycle.start?.getTime?.() || 0;
-    const cycleEndTime = billingCycle.end?.getTime?.() || Number.MAX_SAFE_INTEGER;
-
-    const localUsedCount = invites.reduce((sum, item) => {
-      if (item.status === "취소") return sum;
-      const createdAt = new Date(item.createdAt).getTime();
-      if (Number.isNaN(createdAt)) return sum;
-      if (createdAt < cycleStartTime || createdAt >= cycleEndTime) return sum;
-      return sum + Number(item.usageLimit || 1);
-    }, 0);
-
-    const serverUsedCount = Number(merchant.usedCount || 0);
-    return Math.max(serverUsedCount, localUsedCount);
-  }, [invites, merchant.usedCount, billingCycle]);
-
-  const additionalPasses = useMemo(() => Math.max(Number(merchant.additionalPasses || 0), 0), [merchant.additionalPasses]);
-  const monthlyQuota = useMemo(() => Number(merchant.monthlyQuota || 0), [merchant.monthlyQuota]);
-  const totalAvailablePasses = useMemo(() => {
-    if (isUnlimitedPlan) return 999999;
-    return monthlyQuota + additionalPasses;
-  }, [isUnlimitedPlan, monthlyQuota, additionalPasses]);
-
   const remainingPasses = useMemo(() => {
     if (isUnlimitedPlan) return 999999;
-    return Math.max(totalAvailablePasses - monthlyUsedCount, 0);
-  }, [isUnlimitedPlan, totalAvailablePasses, monthlyUsedCount]);
 
-  const monthlyRemainingPasses = useMemo(() => {
-    if (isUnlimitedPlan) return 999999;
-    return Math.max(monthlyQuota - monthlyUsedCount, 0);
-  }, [isUnlimitedPlan, monthlyQuota, monthlyUsedCount]);
+    // 승인일 기준 1개월 주기로 사용량을 계산합니다.
+    // 다음 주기가 되면 로컬 발행 내역 기준 잔여 수량은 자동으로 월 한도만큼 복구됩니다.
+    const cycleStartTime = billingCycle.start?.getTime?.() || 0;
+    const cycleEndTime = billingCycle.end?.getTime?.() || Number.MAX_SAFE_INTEGER;
+    const localUsedCount = invites.filter((item) => {
+      if (item.status === "취소") return false;
+      const createdAt = new Date(item.createdAt).getTime();
+      if (Number.isNaN(createdAt)) return false;
+      return createdAt >= cycleStartTime && createdAt < cycleEndTime;
+    }).length;
 
-  const additionalRemainingPasses = useMemo(() => {
-    if (isUnlimitedPlan) return 0;
-    const additionalUsed = Math.max(monthlyUsedCount - monthlyQuota, 0);
-    return Math.max(additionalPasses - additionalUsed, 0);
-  }, [isUnlimitedPlan, additionalPasses, monthlyUsedCount, monthlyQuota]);
+    const serverUsedCount = Number(merchant.usedCount || 0);
+    const usedCount = Math.max(serverUsedCount, localUsedCount);
+
+    return Math.max(Number(merchant.monthlyQuota || 0) - usedCount, 0);
+  }, [invites, merchant.monthlyQuota, merchant.usedCount, isUnlimitedPlan, billingCycle]);
 
   const remainingPassesRef = useRef(remainingPasses);
   useEffect(() => {
@@ -762,6 +742,41 @@ export default function MerchantDashboard() {
   function persistInvites(nextInvites) {
     setInvites(nextInvites);
     localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(nextInvites));
+  }
+
+  function applyIssuedUsageToMerchant(result, issuedUsageLimit) {
+    const nextUsedCount =
+      result?.merchantUsedCount !== undefined
+        ? Number(result.merchantUsedCount)
+        : Number(merchant.usedCount || 0) + Number(issuedUsageLimit || 1);
+
+    if (!Number.isFinite(nextUsedCount)) return;
+
+    setMerchant((prev) => {
+      const nextMerchant = {
+        ...prev,
+        usedCount: nextUsedCount,
+        monthlyQuota:
+          result?.merchantMonthlyQuota !== undefined
+            ? Number(result.merchantMonthlyQuota)
+            : prev.monthlyQuota,
+        planLimit:
+          result?.merchantPlanLimit !== undefined
+            ? Number(result.merchantPlanLimit)
+            : prev.planLimit,
+        additionalPasses:
+          result?.merchantAdditionalPasses !== undefined
+            ? Number(result.merchantAdditionalPasses)
+            : Number(prev.additionalPasses || 0),
+        totalLimit:
+          result?.merchantTotalLimit !== undefined
+            ? Number(result.merchantTotalLimit)
+            : prev.totalLimit,
+      };
+
+      localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(nextMerchant));
+      return nextMerchant;
+    });
   }
 
   function handleChange(field, value) {
@@ -1081,6 +1096,7 @@ export default function MerchantDashboard() {
         usedAt: "",
       });
 
+      applyIssuedUsageToMerchant(result, Number(newInvite.usageLimit || 1));
       persistInvites([newInvite, ...invites]);
       setIssuedInvite({
         ...newInvite,
@@ -1185,6 +1201,7 @@ export default function MerchantDashboard() {
         serverInviteUrl: inviteUrl,
       });
 
+      applyIssuedUsageToMerchant(result, Number(newQrInvite.usageLimit || 1));
       persistInvites([newQrInvite, ...invites]);
       setQrTicket({
         ...newQrInvite,
@@ -1226,10 +1243,35 @@ export default function MerchantDashboard() {
     setToast("주차권을 만료 처리했습니다.");
   }
 
+  function resetDemoData() {
+    localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(defaultMerchant));
+    localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify([]));
+
+    setMerchant(defaultMerchant);
+    setInvites([]);
+    setFavorites([]);
+
+    setPendingPass(null);
+    setConfirmModalOpen(false);
+
+    setQrTicket(null);
+    setQrTicketUsed(false);
+    setQrModalOpen(false);
+
+    setFavoriteModalOpen(false);
+    setIssuedInvite(null);
+
+    resetForm();
+    setShowHistoryPanel(false);
+
+    setToast("로컬 발행 내역을 초기화했습니다.");
+  }
+
   const stats = [
     { label: "잔여 주차권", value: isUnlimitedPlan ? "무제한" : `${remainingPasses}` },
     { label: "오늘 발행", value: `${todayIssued}` },
-    { label: "이번 달 한도", value: isUnlimitedPlan ? "무제한" : `${totalAvailablePasses}` },
+    { label: "이번 달 한도", value: isUnlimitedPlan ? "무제한" : `${merchant.monthlyQuota}` },
   ];
 
 
@@ -1246,6 +1288,12 @@ export default function MerchantDashboard() {
             <div className="whitespace-nowrap rounded-2xl bg-white px-3 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
               고객센터 : <span className="font-black text-slate-950">1533 3302</span>
             </div>
+            <button
+              onClick={resetDemoData}
+              className="rounded-2xl border px-4 py-2 text-sm font-medium leading-tight shadow-sm hover:bg-slate-50"
+            >
+              데모<br />초기화
+            </button>
             <button
               type="button"
               onClick={handleLogout}
@@ -1723,23 +1771,6 @@ export default function MerchantDashboard() {
               </div>
             ))}
           </div>
-
-          {!isUnlimitedPlan && additionalPasses > 0 ? (
-            <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-blue-900">추가 주차권</p>
-                  <p className="mt-1 text-xs text-blue-700">
-                    월 한도를 먼저 소진한 뒤 추가 주차권이 사용됩니다. 남은 추가 주차권은 다음 달로 이월됩니다.
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-2xl font-black text-blue-900">{additionalRemainingPasses}</p>
-                  <p className="text-xs font-semibold text-blue-700">총 추가 {additionalPasses}건</p>
-                </div>
-              </div>
-            </div>
-          ) : null}
 
           {showHistoryPanel ? (
             <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
