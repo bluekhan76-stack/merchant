@@ -53,7 +53,8 @@ function planLabel(planLimit) {
 }
 
 function mapMerchantFromApi(item) {
-  const planLimit = item?.planLimit === "unlimited" ? -1 : Number(item?.planLimit ?? defaultMerchant.monthlyQuota);
+  const planLimit = item?.planLimit === "unlimited" ? -1 : Number(item?.monthlyQuota ?? item?.planLimit ?? defaultMerchant.monthlyQuota);
+  const additionalPasses = Number(item?.additionalPasses || 0);
   const buildingName = item?.buildingName || item?.shopName || defaultMerchant.shopName;
   const roomNo = item?.roomNo || "";
   const shopName = buildingName;
@@ -71,6 +72,8 @@ function mapMerchantFromApi(item) {
     planLimit,
     planName: planLabel(planLimit),
     monthlyQuota: planLimit,
+    additionalPasses,
+    totalLimit: planLimit === -1 ? -1 : planLimit + additionalPasses,
     usedCount: Number(item?.usedCount || 0),
     isActive: item?.isActive !== false,
     status: item?.status || "pending",
@@ -679,22 +682,31 @@ export default function MerchantDashboard() {
   const remainingPasses = useMemo(() => {
     if (isUnlimitedPlan) return 999999;
 
-    // 승인일 기준 1개월 주기로 사용량을 계산합니다.
-    // 다음 주기가 되면 로컬 발행 내역 기준 잔여 수량은 자동으로 월 한도만큼 복구됩니다.
     const cycleStartTime = billingCycle.start?.getTime?.() || 0;
     const cycleEndTime = billingCycle.end?.getTime?.() || Number.MAX_SAFE_INTEGER;
-    const localUsedCount = invites.filter((item) => {
-      if (item.status === "취소") return false;
+    const localUsedCount = invites.reduce((sum, item) => {
+      if (item.status === "취소") return sum;
       const createdAt = new Date(item.createdAt).getTime();
-      if (Number.isNaN(createdAt)) return false;
-      return createdAt >= cycleStartTime && createdAt < cycleEndTime;
-    }).length;
+      if (Number.isNaN(createdAt)) return sum;
+      if (createdAt < cycleStartTime || createdAt >= cycleEndTime) return sum;
+      return sum + Number(item.usageLimit || 1);
+    }, 0);
 
     const serverUsedCount = Number(merchant.usedCount || 0);
     const usedCount = Math.max(serverUsedCount, localUsedCount);
+    const monthlyQuota = Number(merchant.monthlyQuota || 0);
+    const additionalPasses = Number(merchant.additionalPasses || 0);
+    const totalLimit = monthlyQuota + additionalPasses;
 
-    return Math.max(Number(merchant.monthlyQuota || 0) - usedCount, 0);
-  }, [invites, merchant.monthlyQuota, merchant.usedCount, isUnlimitedPlan, billingCycle]);
+    return Math.max(totalLimit - usedCount, 0);
+  }, [
+    invites,
+    merchant.monthlyQuota,
+    merchant.additionalPasses,
+    merchant.usedCount,
+    isUnlimitedPlan,
+    billingCycle,
+  ]);
 
   const remainingPassesRef = useRef(remainingPasses);
   useEffect(() => {
@@ -744,34 +756,28 @@ export default function MerchantDashboard() {
     localStorage.setItem(STORAGE_KEYS.invites, JSON.stringify(nextInvites));
   }
 
-  function applyIssuedUsageToMerchant(result, issuedUsageLimit) {
-    const nextUsedCount =
-      result?.merchantUsedCount !== undefined
-        ? Number(result.merchantUsedCount)
-        : Number(merchant.usedCount || 0) + Number(issuedUsageLimit || 1);
-
-    if (!Number.isFinite(nextUsedCount)) return;
-
+  function updateMerchantUsageFromApi(result, fallbackIncrement = 1) {
     setMerchant((prev) => {
+      const apiUsedCount = Number(result?.merchantUsedCount);
+      const nextUsedCount = Number.isFinite(apiUsedCount)
+        ? apiUsedCount
+        : Number(prev.usedCount || 0) + Number(fallbackIncrement || 1);
+
+      const nextAdditionalPasses = Number(
+        result?.merchantAdditionalPasses ?? prev.additionalPasses ?? 0
+      );
+
+      const nextMonthlyQuota = Number(
+        result?.merchantMonthlyQuota ?? result?.merchantPlanLimit ?? prev.monthlyQuota ?? prev.planLimit ?? 0
+      );
+
       const nextMerchant = {
         ...prev,
         usedCount: nextUsedCount,
-        monthlyQuota:
-          result?.merchantMonthlyQuota !== undefined
-            ? Number(result.merchantMonthlyQuota)
-            : prev.monthlyQuota,
-        planLimit:
-          result?.merchantPlanLimit !== undefined
-            ? Number(result.merchantPlanLimit)
-            : prev.planLimit,
-        additionalPasses:
-          result?.merchantAdditionalPasses !== undefined
-            ? Number(result.merchantAdditionalPasses)
-            : Number(prev.additionalPasses || 0),
-        totalLimit:
-          result?.merchantTotalLimit !== undefined
-            ? Number(result.merchantTotalLimit)
-            : prev.totalLimit,
+        additionalPasses: nextAdditionalPasses,
+        monthlyQuota: nextMonthlyQuota,
+        planLimit: nextMonthlyQuota,
+        totalLimit: nextMonthlyQuota === -1 ? -1 : nextMonthlyQuota + nextAdditionalPasses,
       };
 
       localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(nextMerchant));
@@ -995,6 +1001,7 @@ export default function MerchantDashboard() {
         serverInviteUrl: inviteUrl,
       });
 
+      updateMerchantUsageFromApi(result, Number(savedInvite.usageLimit || 1));
       persistInvites([savedInvite, ...invites]);
       setIssuedInvite({
         ...savedInvite,
@@ -1096,7 +1103,7 @@ export default function MerchantDashboard() {
         usedAt: "",
       });
 
-      applyIssuedUsageToMerchant(result, Number(newInvite.usageLimit || 1));
+      updateMerchantUsageFromApi(result, Number(newInvite.usageLimit || 1));
       persistInvites([newInvite, ...invites]);
       setIssuedInvite({
         ...newInvite,
@@ -1201,7 +1208,7 @@ export default function MerchantDashboard() {
         serverInviteUrl: inviteUrl,
       });
 
-      applyIssuedUsageToMerchant(result, Number(newQrInvite.usageLimit || 1));
+      updateMerchantUsageFromApi(result, Number(newQrInvite.usageLimit || 1));
       persistInvites([newQrInvite, ...invites]);
       setQrTicket({
         ...newQrInvite,
@@ -1268,10 +1275,14 @@ export default function MerchantDashboard() {
     setToast("로컬 발행 내역을 초기화했습니다.");
   }
 
+  const monthlyQuotaValue = Number(merchant.monthlyQuota || 0);
+  const additionalPassesValue = Number(merchant.additionalPasses || 0);
+  const totalLimitValue = isUnlimitedPlan ? -1 : monthlyQuotaValue + additionalPassesValue;
+
   const stats = [
     { label: "잔여 주차권", value: isUnlimitedPlan ? "무제한" : `${remainingPasses}` },
     { label: "오늘 발행", value: `${todayIssued}` },
-    { label: "이번 달 한도", value: isUnlimitedPlan ? "무제한" : `${merchant.monthlyQuota}` },
+    { label: "이번 달 한도", value: isUnlimitedPlan ? "무제한" : `${totalLimitValue}` },
   ];
 
 
@@ -1288,12 +1299,6 @@ export default function MerchantDashboard() {
             <div className="whitespace-nowrap rounded-2xl bg-white px-3 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
               고객센터 : <span className="font-black text-slate-950">1533 3302</span>
             </div>
-            <button
-              onClick={resetDemoData}
-              className="rounded-2xl border px-4 py-2 text-sm font-medium leading-tight shadow-sm hover:bg-slate-50"
-            >
-              데모<br />초기화
-            </button>
             <button
               type="button"
               onClick={handleLogout}
@@ -1770,6 +1775,18 @@ export default function MerchantDashboard() {
                 <p className="mt-1 text-xl font-bold">{item.value}</p>
               </div>
             ))}
+          </div>
+
+          <div className="mt-2 rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-950 ring-1 ring-indigo-100">
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-semibold">추가 주차권</span>
+              <span className="text-lg font-black">
+                {isUnlimitedPlan ? "무제한" : `${additionalPassesValue}`}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-indigo-700">
+              기본 월 한도를 먼저 사용하고, 초과분부터 추가 주차권이 사용됩니다. 남은 추가 주차권은 다음 달로 이월됩니다.
+            </p>
           </div>
 
           {showHistoryPanel ? (
