@@ -77,7 +77,7 @@ function mapMerchantFromApi(item) {
     usedCount: Number(item?.usedCount || 0),
     isActive: item?.isActive !== false,
     status: item?.status || "pending",
-    parkingGates: defaultMerchant.parkingGates,
+    parkingGates: normalizeParkingGates(item?.parkingGates || item?.gates || item?.gateMacAddresses, defaultMerchant.parkingGates),
   };
 }
 
@@ -324,6 +324,40 @@ function gateNamesFromIds(gateIds, merchantParkingGates = BARRIER_OPTIONS) {
     .filter(Boolean);
 }
 
+function normalizeParkingGates(gates, fallbackGates = BARRIER_OPTIONS) {
+  const source = Array.isArray(gates) && gates.length > 0 ? gates : fallbackGates;
+
+  return source
+    .map((gate, index) => {
+      const fallbackGate = fallbackGates[index] || {};
+      return {
+        id: gate?.id || gate?.gateId || fallbackGate.id || `gate-${index + 1}`,
+        name: gate?.name || gate?.gateName || fallbackGate.name || `차단기 ${index + 1}`,
+        macAddress: String(gate?.macAddress || gate?.mac || gate?.macAddr || gate?.address || "")
+          .trim()
+          .toUpperCase(),
+      };
+    })
+    .filter((gate) => gate.id);
+}
+
+function selectedParkingGatesFromIds(gateIds, merchantParkingGates = BARRIER_OPTIONS) {
+  const normalizedIds = normalizeGateIds(gateIds);
+
+  return normalizedIds
+    .map((id) => merchantParkingGates.find((gate) => gate.id === id))
+    .filter(Boolean)
+    .map((gate) => ({
+      id: gate.id,
+      gateId: gate.id,
+      name: gate.name,
+      gateName: gate.name,
+      macAddress: String(gate.macAddress || gate.mac || gate.macAddr || gate.address || "")
+        .trim()
+        .toUpperCase(),
+    }));
+}
+
 function sanitizeInvite(item) {
   const parkingGateIds = normalizeGateIds(
     item?.parkingGateIds || (item?.parkingGateId ? [item.parkingGateId] : null)
@@ -334,6 +368,8 @@ function sanitizeInvite(item) {
       : item?.parkingGateName
         ? [item.parkingGateName]
         : gateNamesFromIds(parkingGateIds);
+  const parkingGates = normalizeParkingGates(item?.parkingGates || item?.gates || [])
+    .filter((gate) => parkingGateIds.length === 0 || parkingGateIds.includes(gate.id));
 
   return {
     id: item?.id || safeUuid(),
@@ -344,6 +380,7 @@ function sanitizeInvite(item) {
     shopName: item?.shopName || defaultMerchant.shopName,
     parkingGateIds,
     parkingGateNames,
+    parkingGates,
     memo: item?.memo || "",
     durationMinutes: Number(item?.durationMinutes || 60),
     expiresAt: item?.expiresAt || futureIso(60),
@@ -431,6 +468,7 @@ function buildInitialForm(defaultGateId = BARRIER_OPTIONS[0].id) {
 function buildPendingPass({ form, merchant, invites }) {
   const selectedGateIds = normalizeGateIds(form.selectedGateIds);
   const selectedGateNames = gateNamesFromIds(selectedGateIds, merchant.parkingGates);
+  const selectedParkingGates = selectedParkingGatesFromIds(selectedGateIds, merchant.parkingGates);
   const history = invites
     .filter((item) => item.phone === form.phone)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -442,6 +480,7 @@ function buildPendingPass({ form, merchant, invites }) {
     shopName: merchant.shopName,
     parkingGateIds: selectedGateIds,
     parkingGateNames: selectedGateNames,
+    parkingGates: selectedParkingGates,
     memo: form.memo.trim(),
     durationMinutes: Number(form.durationMinutes),
     expiresAt: futureIso(Number(form.durationMinutes)),
@@ -462,6 +501,7 @@ async function requestParkingPass({
   parkingGateId,
   parkingGateIds,
   parkingGateNames,
+  parkingGates,
   validMinutes,
   memo,
   usageLimit,
@@ -488,6 +528,7 @@ async function requestParkingPass({
       parkingGateId,
       parkingGateIds: Array.isArray(parkingGateIds) ? parkingGateIds : undefined,
       parkingGateNames: Array.isArray(parkingGateNames) ? parkingGateNames : undefined,
+      parkingGates: Array.isArray(parkingGates) ? parkingGates : undefined,
       validMinutes,
       memo: memo || "",
       usageLimit,
@@ -519,6 +560,7 @@ async function requestQrParkingPass({
   visitorName,
   parkingGateIds,
   parkingGateNames,
+  parkingGates,
   validMinutes,
   memo,
   usageLimit,
@@ -532,6 +574,7 @@ async function requestQrParkingPass({
     parkingGateId: parkingGateIds[0],
     parkingGateIds,
     parkingGateNames,
+    parkingGates,
     validMinutes,
     memo: memo || "",
     usageLimit,
@@ -971,6 +1014,7 @@ export default function MerchantDashboard() {
         parkingGateId: pendingPass.parkingGateIds[0],
         parkingGateIds: pendingPass.parkingGateIds,
         parkingGateNames: pendingPass.parkingGateNames,
+        parkingGates: pendingPass.parkingGates,
         validMinutes: pendingPass.durationMinutes,
         memo: pendingPass.memo,
         usageLimit: pendingPass.usageLimit,
@@ -1165,6 +1209,7 @@ export default function MerchantDashboard() {
 
     const selectedGateIds = normalizeGateIds(form.selectedGateIds);
     const selectedGateNames = gateNamesFromIds(selectedGateIds, merchant.parkingGates);
+    const selectedParkingGates = selectedParkingGatesFromIds(selectedGateIds, merchant.parkingGates);
 
     setQrBusy(true);
     setApiStatus("서버에 QR 주차권 등록 요청 중입니다...");
@@ -1174,6 +1219,7 @@ export default function MerchantDashboard() {
         visitorName: form.visitorName.trim() || "QR 방문자",
         parkingGateIds: selectedGateIds,
         parkingGateNames: selectedGateNames,
+        parkingGates: selectedParkingGates,
         validMinutes: Number(form.durationMinutes),
         memo: form.memo.trim(),
         usageLimit,
@@ -1195,6 +1241,7 @@ export default function MerchantDashboard() {
         shopName: merchant.shopName,
         parkingGateIds: selectedGateIds,
         parkingGateNames: selectedGateNames,
+        parkingGates: selectedParkingGates,
         memo: form.memo.trim(),
         durationMinutes: Number(form.durationMinutes),
         expiresAt: futureIso(Number(form.durationMinutes)),
