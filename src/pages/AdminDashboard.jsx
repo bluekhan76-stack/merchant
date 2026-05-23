@@ -38,6 +38,52 @@ function planLabel(value) {
   return String(value ?? "-");
 }
 
+const DEFAULT_PARKING_GATES = [
+  { id: "gate-1", name: "차단기 1", macAddress: "" },
+  { id: "gate-2", name: "차단기 2", macAddress: "" },
+  { id: "gate-3", name: "차단기 3", macAddress: "" },
+  { id: "gate-4", name: "차단기 4", macAddress: "" },
+];
+
+function normalizeMacInput(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^0-9a-fA-F]/g, "")
+    .slice(0, 12)
+    .toUpperCase()
+    .replace(/(.{2})(?=.)/g, "$1:");
+}
+
+function getParkingGates(merchant) {
+  const source = Array.isArray(merchant?.parkingGates) && merchant.parkingGates.length > 0
+    ? merchant.parkingGates
+    : DEFAULT_PARKING_GATES;
+
+  return DEFAULT_PARKING_GATES.map((fallbackGate, index) => {
+    const matched =
+      source.find((gate) => gate?.id === fallbackGate.id) ||
+      source[index] ||
+      {};
+
+    return {
+      id: matched.id || fallbackGate.id,
+      name: matched.name || fallbackGate.name,
+      macAddress: normalizeMacInput(matched.macAddress || matched.mac || matched.macAddr || ""),
+    };
+  });
+}
+
+function buildParkingGatesWithMac(merchant, gateId, macAddress) {
+  return getParkingGates(merchant).map((gate) =>
+    gate.id === gateId
+      ? {
+          ...gate,
+          macAddress: normalizeMacInput(macAddress),
+        }
+      : gate
+  );
+}
+
 export default function AdminDashboard() {
   const navigate = useNavigate();
 
@@ -46,7 +92,6 @@ export default function AdminDashboard() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [additionalPassInputs, setAdditionalPassInputs] = useState({});
 
   const filteredMerchants = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -149,25 +194,6 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
     }
-  }
-
-  async function addAdditionalPasses(merchant) {
-    const rawValue = additionalPassInputs[merchant.merchantId] || "";
-    const addCount = Math.floor(Number(rawValue));
-
-    if (!Number.isFinite(addCount) || addCount <= 0) {
-      alert("추가할 주차권 수량을 1 이상으로 입력해 주세요.");
-      return;
-    }
-
-    const currentAdditionalPasses = Number(merchant.additionalPasses || merchant.extraPasses || 0);
-    const nextAdditionalPasses = currentAdditionalPasses + addCount;
-
-    if (!window.confirm(`${addCount}건을 추가하시겠습니까?`)) return;
-
-    await updateMerchant(merchant.merchantId, { additionalPasses: nextAdditionalPasses });
-    setAdditionalPassInputs((prev) => ({ ...prev, [merchant.merchantId]: "" }));
-    alert("추가 주차권이 반영되었습니다.");
   }
 
   async function updateMerchant(merchantId, patch) {
@@ -316,7 +342,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-left text-sm">
+            <table className="w-full min-w-[1200px] text-left text-sm">
               <thead className="border-b text-slate-500">
                 <tr>
                   <th className="py-3">아이디</th>
@@ -324,7 +350,7 @@ export default function AdminDashboard() {
                   <th>호실</th>
                   <th>요금제</th>
                   <th>사용 횟수</th>
-                  <th>추가 주차권</th>
+                  <th>차단기 MAC 주소</th>
                   <th>활성화</th>
                 </tr>
               </thead>
@@ -344,13 +370,7 @@ export default function AdminDashboard() {
                       <td>
                         <select
                           value={item.planLimit === -1 ? "unlimited" : item.planLimit}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            updateMerchant(item.merchantId, {
-                              planLimit: value,
-                              monthlyQuota: value === "unlimited" ? -1 : Number(value),
-                            });
-                          }}
+                          onChange={(e) => updateMerchant(item.merchantId, { planLimit: e.target.value })}
                           className="rounded-xl border px-3 py-2"
                           disabled={loading}
                         >
@@ -365,32 +385,31 @@ export default function AdminDashboard() {
                         {item.usedCount || 0} / {planLabel(item.planLimit)}
                       </td>
                       <td className="py-3">
-                        <div className="flex items-center gap-2 whitespace-nowrap">
-                          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
-                            보유 {Number(item.additionalPasses || item.extraPasses || 0)}건
-                          </span>
-                          <input
-                            type="number"
-                            min="1"
-                            value={additionalPassInputs[item.merchantId] || ""}
-                            onChange={(e) =>
-                              setAdditionalPassInputs((prev) => ({
-                                ...prev,
-                                [item.merchantId]: e.target.value,
-                              }))
-                            }
-                            placeholder="추가 수량"
-                            className="w-24 rounded-xl border px-3 py-2 text-xs"
-                            disabled={loading}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => addAdditionalPasses(item)}
-                            className="rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
-                            disabled={loading}
-                          >
-                            추가
-                          </button>
+                        <div className="grid min-w-[360px] grid-cols-1 gap-2">
+                          {getParkingGates(item).map((gate) => (
+                            <label key={gate.id} className="flex items-center gap-2">
+                              <span className="w-16 shrink-0 text-xs font-semibold text-slate-600">
+                                {gate.name}
+                              </span>
+                              <input
+                                type="text"
+                                defaultValue={gate.macAddress}
+                                placeholder="AA:BB:CC:DD:EE:FF"
+                                maxLength={17}
+                                onBlur={(e) =>
+                                  updateMerchant(item.merchantId, {
+                                    parkingGates: buildParkingGatesWithMac(
+                                      item,
+                                      gate.id,
+                                      e.target.value
+                                    ),
+                                  })
+                                }
+                                className="w-44 rounded-xl border px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-slate-300"
+                                disabled={loading}
+                              />
+                            </label>
+                          ))}
                         </div>
                       </td>
                       <td className="py-3">
