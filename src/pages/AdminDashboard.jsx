@@ -342,7 +342,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[1200px] text-left text-sm">
+            <table className="w-full min-w-[980px] text-left text-sm">
               <thead className="border-b text-slate-500">
                 <tr>
                   <th className="py-3">아이디</th>
@@ -351,7 +351,7 @@ export default function AdminDashboard() {
                   <th>요금제</th>
                   <th>사용 횟수</th>
                   <th>차단기 MAC 주소</th>
-                  <th>활성화</th>
+                  <th className="w-[190px]">활성화</th>
                 </tr>
               </thead>
               <tbody>
@@ -385,10 +385,10 @@ export default function AdminDashboard() {
                         {item.usedCount || 0} / {planLabel(item.planLimit)}
                       </td>
                       <td className="py-3">
-                        <div className="grid min-w-[360px] grid-cols-1 gap-2">
+                        <div className="grid min-w-[250px] grid-cols-1 gap-2">
                           {getParkingGates(item).map((gate) => (
                             <label key={gate.id} className="flex items-center gap-2">
-                              <span className="w-16 shrink-0 text-xs font-semibold text-slate-600">
+                              <span className="w-12 shrink-0 text-xs font-semibold text-slate-600">
                                 {gate.name}
                               </span>
                               <input
@@ -405,7 +405,7 @@ export default function AdminDashboard() {
                                     ),
                                   })
                                 }
-                                className="w-44 rounded-xl border px-3 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-slate-300"
+                                className="w-36 rounded-xl border px-2 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-slate-300"
                                 disabled={loading}
                               />
                             </label>
