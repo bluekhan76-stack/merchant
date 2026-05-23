@@ -77,7 +77,7 @@ function mapMerchantFromApi(item) {
     usedCount: Number(item?.usedCount || 0),
     isActive: item?.isActive !== false,
     status: item?.status || "pending",
-    parkingGates: normalizeParkingGates(item?.parkingGates || item?.gates || item?.gateMacAddresses, defaultMerchant.parkingGates),
+    parkingGates: normalizeParkingGates(item?.parkingGates || item?.gates || item?.parkingGateMacAddresses || item?.gateMacAddresses),
   };
 }
 
@@ -111,6 +111,41 @@ const BARRIER_OPTIONS = [
   { id: "gate-3", name: "차단기 3" },
   { id: "gate-4", name: "차단기 4" },
 ];
+
+function normalizeParkingGates(value) {
+  const source = Array.isArray(value) && value.length > 0 ? value : BARRIER_OPTIONS;
+
+  return source
+    .map((item, index) => {
+      if (typeof item === "string") {
+        return {
+          id: `gate-${index + 1}`,
+          name: `차단기 ${index + 1}`,
+          macAddress: item.trim().toUpperCase(),
+        };
+      }
+
+      const id = (item?.id || item?.gateId || `gate-${index + 1}`).toString();
+      const name = (item?.name || item?.gateName || item?.label || `차단기 ${index + 1}`).toString();
+      const macAddress = (item?.macAddress || item?.mac || item?.gateMac || item?.address || "")
+        .toString()
+        .trim()
+        .toUpperCase();
+
+      return {
+        ...item,
+        id,
+        name,
+        ...(macAddress ? { macAddress } : {}),
+      };
+    })
+    .filter((item) => item.id);
+}
+
+function parkingGatesFromIds(gateIds, merchantParkingGates = BARRIER_OPTIONS) {
+  const selectedIds = normalizeGateIds(gateIds);
+  return normalizeParkingGates(merchantParkingGates).filter((gate) => selectedIds.includes(gate.id));
+}
 
 
 const DURATION_OPTIONS = [
@@ -324,40 +359,6 @@ function gateNamesFromIds(gateIds, merchantParkingGates = BARRIER_OPTIONS) {
     .filter(Boolean);
 }
 
-function normalizeParkingGates(gates, fallbackGates = BARRIER_OPTIONS) {
-  const source = Array.isArray(gates) && gates.length > 0 ? gates : fallbackGates;
-
-  return source
-    .map((gate, index) => {
-      const fallbackGate = fallbackGates[index] || {};
-      return {
-        id: gate?.id || gate?.gateId || fallbackGate.id || `gate-${index + 1}`,
-        name: gate?.name || gate?.gateName || fallbackGate.name || `차단기 ${index + 1}`,
-        macAddress: String(gate?.macAddress || gate?.mac || gate?.macAddr || gate?.address || "")
-          .trim()
-          .toUpperCase(),
-      };
-    })
-    .filter((gate) => gate.id);
-}
-
-function selectedParkingGatesFromIds(gateIds, merchantParkingGates = BARRIER_OPTIONS) {
-  const normalizedIds = normalizeGateIds(gateIds);
-
-  return normalizedIds
-    .map((id) => merchantParkingGates.find((gate) => gate.id === id))
-    .filter(Boolean)
-    .map((gate) => ({
-      id: gate.id,
-      gateId: gate.id,
-      name: gate.name,
-      gateName: gate.name,
-      macAddress: String(gate.macAddress || gate.mac || gate.macAddr || gate.address || "")
-        .trim()
-        .toUpperCase(),
-    }));
-}
-
 function sanitizeInvite(item) {
   const parkingGateIds = normalizeGateIds(
     item?.parkingGateIds || (item?.parkingGateId ? [item.parkingGateId] : null)
@@ -368,8 +369,6 @@ function sanitizeInvite(item) {
       : item?.parkingGateName
         ? [item.parkingGateName]
         : gateNamesFromIds(parkingGateIds);
-  const parkingGates = normalizeParkingGates(item?.parkingGates || item?.gates || [])
-    .filter((gate) => parkingGateIds.length === 0 || parkingGateIds.includes(gate.id));
 
   return {
     id: item?.id || safeUuid(),
@@ -380,7 +379,6 @@ function sanitizeInvite(item) {
     shopName: item?.shopName || defaultMerchant.shopName,
     parkingGateIds,
     parkingGateNames,
-    parkingGates,
     memo: item?.memo || "",
     durationMinutes: Number(item?.durationMinutes || 60),
     expiresAt: item?.expiresAt || futureIso(60),
@@ -468,7 +466,6 @@ function buildInitialForm(defaultGateId = BARRIER_OPTIONS[0].id) {
 function buildPendingPass({ form, merchant, invites }) {
   const selectedGateIds = normalizeGateIds(form.selectedGateIds);
   const selectedGateNames = gateNamesFromIds(selectedGateIds, merchant.parkingGates);
-  const selectedParkingGates = selectedParkingGatesFromIds(selectedGateIds, merchant.parkingGates);
   const history = invites
     .filter((item) => item.phone === form.phone)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -480,7 +477,7 @@ function buildPendingPass({ form, merchant, invites }) {
     shopName: merchant.shopName,
     parkingGateIds: selectedGateIds,
     parkingGateNames: selectedGateNames,
-    parkingGates: selectedParkingGates,
+    parkingGates: parkingGatesFromIds(selectedGateIds, merchant.parkingGates),
     memo: form.memo.trim(),
     durationMinutes: Number(form.durationMinutes),
     expiresAt: futureIso(Number(form.durationMinutes)),
@@ -656,7 +653,7 @@ export default function MerchantDashboard() {
           const savedMerchant = localStorage.getItem(STORAGE_KEYS.merchant);
           if (savedMerchant) {
             try {
-              setMerchant({ ...defaultMerchant, ...JSON.parse(savedMerchant), parkingGates: BARRIER_OPTIONS });
+              setMerchant({ ...defaultMerchant, ...JSON.parse(savedMerchant), parkingGates: normalizeParkingGates(JSON.parse(savedMerchant)?.parkingGates) });
             } catch {
               setMerchant(defaultMerchant);
             }
@@ -1209,7 +1206,7 @@ export default function MerchantDashboard() {
 
     const selectedGateIds = normalizeGateIds(form.selectedGateIds);
     const selectedGateNames = gateNamesFromIds(selectedGateIds, merchant.parkingGates);
-    const selectedParkingGates = selectedParkingGatesFromIds(selectedGateIds, merchant.parkingGates);
+    const selectedParkingGates = parkingGatesFromIds(selectedGateIds, merchant.parkingGates);
 
     setQrBusy(true);
     setApiStatus("서버에 QR 주차권 등록 요청 중입니다...");
@@ -1778,7 +1775,7 @@ export default function MerchantDashboard() {
                             onChange={() => toggleBarrier(barrier.id)}
                             className="h-3 w-3 shrink-0"
                           />
-                          <span className="text-[11px] font-medium leading-none">{barrier.name}</span>
+                          <span className="text-[11px] font-medium leading-none">{barrier.name}{barrier.macAddress ? ` (${barrier.macAddress})` : ""}</span>
                         </label>
                       );
                     })}
