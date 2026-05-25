@@ -582,7 +582,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[1220px] table-fixed text-left text-sm">
+            <table className="w-full min-w-[980px] table-fixed text-left text-sm">
               <thead className="border-b text-slate-500">
                 <tr>
                   <th className="w-[95px] py-3">아이디</th>
@@ -590,10 +590,10 @@ export default function AdminDashboard() {
                   <th className="w-[55px]">호실</th>
                   <th className="w-[120px]">요금제</th>
                   <th className="w-[150px]">사용 횟수</th>
-                  <th className="w-[150px]">사용기간 상태</th>
-                  <th className="w-[165px]">주차권 추가</th>
-                  <th className="w-[260px]">차단기 MAC 주소</th>
-                  <th className="w-[140px]">관리</th>
+                  <th className="w-[170px]">사용기간 상태</th>
+                  <th className="w-[140px]">주차권 추가</th>
+                  <th className="w-[220px]">차단기 MAC 주소</th>
+                  <th className="w-[180px]">관리</th>
                 </tr>
               </thead>
               <tbody>
@@ -639,12 +639,13 @@ export default function AdminDashboard() {
                         {(() => {
                           const status = getSubscriptionStatus(item);
                           return (
-                            <div className="space-y-1 whitespace-nowrap">
-                              <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${status.badgeClass}`}>
+                            <div className="flex flex-col gap-1">
+                              <span className={`inline-flex w-fit rounded-full border px-2 py-1 text-xs font-semibold ${status.badgeClass}`}>
                                 {status.label}
                               </span>
-                              <div className="text-xs text-slate-500">
-                                종료: {formatDate(getSubscriptionEndValue(item))}
+                              <div className="break-words text-xs leading-4 text-slate-500">
+                                종료:<br />
+                                {formatDate(getSubscriptionEndValue(item))}
                               </div>
                             </div>
                           );
@@ -706,8 +707,8 @@ export default function AdminDashboard() {
                         </div>
                       </td>
                       <td className="py-3 align-middle">
-                        <div className="flex w-[130px] flex-col items-start gap-2 whitespace-nowrap">
-                          <label className="flex items-center gap-2">
+                        <div className="flex w-[170px] flex-col gap-2">
+                          <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs whitespace-nowrap">
                             <input
                               type="checkbox"
                               checked={Boolean(item.isActive)}
@@ -724,7 +725,7 @@ export default function AdminDashboard() {
                           <button
                             type="button"
                             onClick={() => resetPassword(item.merchantId)}
-                            className="w-full rounded-xl border border-slate-300 px-2 py-2 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded-xl border border-slate-300 px-3 py-2 text-xs whitespace-nowrap hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                             disabled={loading}
                           >
                             비밀번호 초기화
