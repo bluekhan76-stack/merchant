@@ -85,17 +85,18 @@ function buildParkingGatesWithMac(merchant, gateId, macAddress) {
 }
 
 
-function getSubscriptionEndValue(item) {
-  return (
-    item?.subscriptionEndAt ||
-    item?.subscriptionEndDate ||
-    item?.expireAt ||
-    item?.expiredAt ||
-    item?.validUntil ||
-    item?.serviceEndAt ||
-    item?.endAt ||
-    ""
-  );
+function isApprovedMerchant(item) {
+  const status = String(item?.status || "").toLowerCase();
+  return status === "approved" || item?.isActive === true;
+}
+
+function addOneMonth(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const result = new Date(date);
+  result.setMonth(result.getMonth() + 1);
+  return result;
 }
 
 function getSubscriptionStartValue(item) {
@@ -105,27 +106,50 @@ function getSubscriptionStartValue(item) {
     item?.validFrom ||
     item?.serviceStartAt ||
     item?.startAt ||
+    item?.approvedAt ||
+    item?.approvedDate ||
+    item?.updatedAt ||
     ""
   );
 }
 
+function getSubscriptionEndDate(item) {
+  const savedEndValue =
+    item?.subscriptionEndAt ||
+    item?.subscriptionEndDate ||
+    item?.expireAt ||
+    item?.expiredAt ||
+    item?.validUntil ||
+    item?.serviceEndAt ||
+    item?.endAt ||
+    "";
+
+  if (savedEndValue) {
+    const savedEndDate = new Date(savedEndValue);
+    if (!Number.isNaN(savedEndDate.getTime())) return savedEndDate;
+    return null;
+  }
+
+  if (!isApprovedMerchant(item)) return null;
+
+  const startValue = getSubscriptionStartValue(item);
+  if (!startValue) return null;
+
+  return addOneMonth(startValue);
+}
+
+function getSubscriptionEndValue(item) {
+  const endDate = getSubscriptionEndDate(item);
+  return endDate ? endDate.toISOString() : "";
+}
+
 function getSubscriptionStatus(item) {
-  const endValue = getSubscriptionEndValue(item);
-  if (!endValue) {
+  const endDate = getSubscriptionEndDate(item);
+
+  if (!endDate) {
     return {
       key: "missing",
       label: "기간 미설정",
-      badgeClass: "border-slate-200 bg-slate-50 text-slate-600",
-      daysLeft: null,
-      endDate: null,
-    };
-  }
-
-  const endDate = new Date(endValue);
-  if (Number.isNaN(endDate.getTime())) {
-    return {
-      key: "missing",
-      label: "기간 확인 필요",
       badgeClass: "border-slate-200 bg-slate-50 text-slate-600",
       daysLeft: null,
       endDate: null,
