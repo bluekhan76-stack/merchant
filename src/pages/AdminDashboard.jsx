@@ -581,105 +581,82 @@ export default function AdminDashboard() {
             />
           </div>
 
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[980px] table-fixed text-left text-sm">
-              <thead className="border-b text-slate-500">
-                <tr>
-                  <th className="w-[95px] py-3">아이디</th>
-                  <th className="w-[95px]">상가명</th>
-                  <th className="w-[55px]">호실</th>
-                  <th className="w-[120px]">요금제</th>
-                  <th className="w-[150px]">사용 횟수</th>
-                  <th className="w-[170px]">사용기간 상태</th>
-                  <th className="w-[140px]">주차권 추가</th>
-                  <th className="w-[220px]">차단기 MAC 주소</th>
-                  <th className="w-[180px]">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMerchants.length === 0 ? (
-                  <tr>
-                    <td colSpan="9" className="py-6 text-center text-slate-500">
-                      가입된 사용자가 없습니다.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredMerchants.map((item) => (
-                    <tr key={item.merchantId} className="border-b last:border-0">
-                      <td className="py-3 font-semibold">{item.loginId || item.email || item.merchantId}</td>
-                      <td>{item.buildingName || "-"}</td>
-                      <td>{item.roomNo || "-"}</td>
-                      <td>
-                        <select
-                          value={item.planLimit === -1 ? "unlimited" : item.planLimit}
-                          onChange={(e) => updateMerchant(item.merchantId, { planLimit: e.target.value })}
-                          className="rounded-xl border px-3 py-2"
-                          disabled={loading}
-                        >
-                          {PLAN_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                              {option === "unlimited" ? "무제한" : option}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        <div className="whitespace-nowrap">
-                          <div>
-                            {item.usedCount || 0} / {getMonthlyTotalLimit(item) === -1 ? "무제한" : `${getMonthlyTotalLimit(item)}건`}
+          <div className="mt-4 space-y-4">
+            {filteredMerchants.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 py-8 text-center text-sm text-slate-500">
+                가입된 사용자가 없습니다.
+              </div>
+            ) : (
+              filteredMerchants.map((item) => {
+                const status = getSubscriptionStatus(item);
+                const totalLimit = getMonthlyTotalLimit(item);
+                const additionalPasses = getAdditionalPasses(item);
+
+                return (
+                  <div
+                    key={item.merchantId}
+                    className="rounded-2xl border border-slate-200 bg-white p-4"
+                  >
+                    <div className="grid gap-4 lg:grid-cols-[1.35fr_1.15fr_1fr]">
+                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        <div>
+                          <div className="text-xs font-semibold text-slate-500">아이디</div>
+                          <div className="mt-1 break-all font-semibold">
+                            {item.loginId || item.email || item.merchantId}
                           </div>
-                          {getMonthlyTotalLimit(item) !== -1 && getAdditionalPasses(item) > 0 && (
-                            <div className="text-xs text-slate-500">
-                              기본 {item.monthlyQuota ?? item.planLimit ?? 0}건 + 추가 {getAdditionalPasses(item)}건
-                            </div>
-                          )}
                         </div>
-                      </td>
-                      <td>
-                        {(() => {
-                          const status = getSubscriptionStatus(item);
-                          return (
-                            <div className="flex flex-col gap-1">
-                              <span className={`inline-flex w-fit rounded-full border px-2 py-1 text-xs font-semibold ${status.badgeClass}`}>
-                                {status.label}
-                              </span>
-                              <div className="break-words text-xs leading-4 text-slate-500">
-                                종료:<br />
-                                {formatDate(getSubscriptionEndValue(item))}
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </td>
-                      <td className="py-3">
-                        <div className="flex min-w-[150px] items-center gap-2">
-                          <input
-                            type="number"
-                            min="1"
-                            step="1"
-                            value={ticketAddInputs[item.merchantId] || ""}
-                            onChange={(e) =>
-                              setTicketAddInputs((prev) => ({
-                                ...prev,
-                                [item.merchantId]: e.target.value,
-                              }))
-                            }
-                            placeholder="수량"
-                            className="w-20 rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                            disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => addParkingTickets(item)}
-                            className="rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
+                        <div>
+                          <div className="text-xs font-semibold text-slate-500">상가명</div>
+                          <div className="mt-1">{item.buildingName || "-"}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-slate-500">호실</div>
+                          <div className="mt-1">{item.roomNo || "-"}</div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-slate-500">요금제</div>
+                          <select
+                            value={item.planLimit === -1 ? "unlimited" : item.planLimit}
+                            onChange={(e) => updateMerchant(item.merchantId, { planLimit: e.target.value })}
+                            className="mt-1 w-full max-w-[130px] rounded-xl border px-3 py-2"
+                            disabled={loading}
                           >
-                            추가
-                          </button>
+                            {PLAN_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option === "unlimited" ? "무제한" : option}
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                      </td>
-                      <td className="py-3 pr-3">
-                        <div className="grid w-[245px] grid-cols-1 gap-2">
+                        <div>
+                          <div className="text-xs font-semibold text-slate-500">사용 횟수</div>
+                          <div className="mt-1 whitespace-nowrap">
+                            <div>
+                              {item.usedCount || 0} / {totalLimit === -1 ? "무제한" : `${totalLimit}건`}
+                            </div>
+                            {totalLimit !== -1 && additionalPasses > 0 && (
+                              <div className="text-xs text-slate-500">
+                                기본 {item.monthlyQuota ?? item.planLimit ?? 0}건 + 추가 {additionalPasses}건
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-slate-500">사용기간 상태</div>
+                          <div className="mt-1 space-y-1">
+                            <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${status.badgeClass}`}>
+                              {status.label}
+                            </span>
+                            <div className="text-xs leading-5 text-slate-500">
+                              종료: {formatDate(getSubscriptionEndValue(item))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl bg-slate-50 p-3">
+                        <div className="mb-2 text-xs font-semibold text-slate-500">차단기 MAC 주소</div>
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                           {getParkingGates(item).map((gate) => (
                             <label key={gate.id} className="flex items-center gap-2">
                               <span className="w-12 shrink-0 text-xs font-semibold text-slate-600">
@@ -699,44 +676,77 @@ export default function AdminDashboard() {
                                     ),
                                   })
                                 }
-                                className="w-[138px] rounded-xl border px-2 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-slate-300"
+                                className="w-full min-w-0 rounded-xl border bg-white px-2 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-slate-300"
                                 disabled={loading}
                               />
                             </label>
                           ))}
                         </div>
-                      </td>
-                      <td className="py-3 align-middle">
-                        <div className="flex w-[170px] flex-col gap-2">
-                          <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs whitespace-nowrap">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(item.isActive)}
-                              onChange={(e) =>
-                                updateMerchant(item.merchantId, {
-                                  isActive: e.target.checked,
-                                })
-                              }
-                              disabled={loading}
-                            />
-                            <span>{item.isActive ? "활성화" : "비활성화"}</span>
-                          </label>
+                      </div>
 
-                          <button
-                            type="button"
-                            onClick={() => resetPassword(item.merchantId)}
-                            className="rounded-xl border border-slate-300 px-3 py-2 text-xs whitespace-nowrap hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                            disabled={loading}
-                          >
-                            비밀번호 초기화
-                          </button>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                        <div className="rounded-2xl bg-slate-50 p-3">
+                          <div className="mb-2 text-xs font-semibold text-slate-500">주차권 추가</div>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="1"
+                              step="1"
+                              value={ticketAddInputs[item.merchantId] || ""}
+                              onChange={(e) =>
+                                setTicketAddInputs((prev) => ({
+                                  ...prev,
+                                  [item.merchantId]: e.target.value,
+                                }))
+                              }
+                              placeholder="수량"
+                              className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                              disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => addParkingTickets(item)}
+                              className="shrink-0 rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
+                            >
+                              추가
+                            </button>
+                          </div>
                         </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+
+                        <div className="rounded-2xl bg-slate-50 p-3">
+                          <div className="mb-2 text-xs font-semibold text-slate-500">관리</div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-xs whitespace-nowrap">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(item.isActive)}
+                                onChange={(e) =>
+                                  updateMerchant(item.merchantId, {
+                                    isActive: e.target.checked,
+                                  })
+                                }
+                                disabled={loading}
+                              />
+                              <span>{item.isActive ? "활성화" : "비활성화"}</span>
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={() => resetPassword(item.merchantId)}
+                              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs whitespace-nowrap hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={loading}
+                            >
+                              비밀번호 초기화
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </section>
       </main>
