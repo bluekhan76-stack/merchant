@@ -212,6 +212,35 @@ export default function AdminDashboard() {
     }
   }
 
+
+  async function addParkingTickets(item) {
+    if (!item?.merchantId) return;
+
+    if (item.planLimit === -1 || item.planLimit === "unlimited") {
+      alert("무제한 요금제는 주차권 추가가 필요하지 않습니다.");
+      return;
+    }
+
+    const currentLimit = Number(item.planLimit || 0);
+    const input = window.prompt("추가할 주차권 수량을 입력하세요.", "100");
+    if (input === null) return;
+
+    const addCount = Number(input);
+    if (!Number.isInteger(addCount) || addCount <= 0) {
+      alert("추가할 주차권 수량은 1 이상의 정수로 입력해야 합니다.");
+      return;
+    }
+
+    const nextLimit = currentLimit + addCount;
+    const ok = window.confirm(
+      `현재 한도 ${currentLimit}장에 ${addCount}장을 추가하여 총 ${nextLimit}장으로 변경하시겠습니까?`
+    );
+    if (!ok) return;
+
+    await updateMerchant(item.merchantId, { planLimit: nextLimit });
+    alert("주차권이 추가되었습니다.");
+  }
+
   const handleLogout = async () => {
   try {
     await signOut({ global: true });
@@ -368,18 +397,28 @@ export default function AdminDashboard() {
                       <td>{item.buildingName || "-"}</td>
                       <td>{item.roomNo || "-"}</td>
                       <td>
-                        <select
-                          value={item.planLimit === -1 ? "unlimited" : item.planLimit}
-                          onChange={(e) => updateMerchant(item.merchantId, { planLimit: e.target.value })}
-                          className="rounded-xl border px-3 py-2"
-                          disabled={loading}
-                        >
-                          {PLAN_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                              {option === "unlimited" ? "무제한" : option}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="flex flex-col gap-2">
+                          <select
+                            value={item.planLimit === -1 ? "unlimited" : item.planLimit}
+                            onChange={(e) => updateMerchant(item.merchantId, { planLimit: e.target.value })}
+                            className="rounded-xl border px-3 py-2"
+                            disabled={loading}
+                          >
+                            {PLAN_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option === "unlimited" ? "무제한" : option}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => addParkingTickets(item)}
+                            className="rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                            disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
+                          >
+                            주차권 추가
+                          </button>
+                        </div>
                       </td>
                       <td>
                         {item.usedCount || 0} / {planLabel(item.planLimit)}
