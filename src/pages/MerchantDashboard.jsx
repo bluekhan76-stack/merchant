@@ -1240,23 +1240,26 @@ export default function MerchantDashboard() {
       customValidityRange: false,
     };
 
-    const nextPendingQrPass = buildPendingPass({ form: nextForm, merchant, invites });
-    setPendingQrPass({
-      ...nextPendingQrPass,
+    const nextPendingQrPass = {
+      ...buildPendingPass({ form: nextForm, merchant, invites }),
       visitorName: form.visitorName.trim() || "QR 방문자",
       phone: "QR 스캔 발급",
       issueMethod: "qr",
-    });
+    };
+
+    setPendingQrPass(nextPendingQrPass);
     setQrTicket(null);
     setQrTicketUsed(false);
     setQrModalOpen(true);
+    confirmIssueQrPass(nextPendingQrPass);
   }
 
-  async function confirmIssueQrPass() {
-    if (!pendingQrPass) return;
+  async function confirmIssueQrPass(passOverride = null) {
+    const qrPass = passOverride || pendingQrPass || qrTicket;
+    if (!qrPass) return;
 
-    const validFrom = new Date(pendingQrPass.ticketValidFrom);
-    const validUntil = new Date(pendingQrPass.ticketValidUntil);
+    const validFrom = new Date(qrPass.ticketValidFrom);
+    const validUntil = new Date(qrPass.ticketValidUntil);
     if (Number.isNaN(validFrom.getTime()) || Number.isNaN(validUntil.getTime())) {
       setError("주차권 사용 시작일시와 종료일시를 확인해 주세요.");
       return;
@@ -1267,14 +1270,14 @@ export default function MerchantDashboard() {
       return;
     }
 
-    const selectedGateIds = normalizeGateIds(pendingQrPass.parkingGateIds);
+    const selectedGateIds = normalizeGateIds(qrPass.parkingGateIds);
     const selectedGateNames =
-      Array.isArray(pendingQrPass.parkingGateNames) && pendingQrPass.parkingGateNames.length > 0
-        ? pendingQrPass.parkingGateNames
+      Array.isArray(qrPass.parkingGateNames) && qrPass.parkingGateNames.length > 0
+        ? qrPass.parkingGateNames
         : gateNamesFromIds(selectedGateIds, merchant.parkingGates);
     const selectedParkingGates =
-      Array.isArray(pendingQrPass.parkingGates) && pendingQrPass.parkingGates.length > 0
-        ? pendingQrPass.parkingGates
+      Array.isArray(qrPass.parkingGates) && qrPass.parkingGates.length > 0
+        ? qrPass.parkingGates
         : parkingGatesFromIds(selectedGateIds, merchant.parkingGates);
 
     setQrBusy(true);
@@ -1282,13 +1285,13 @@ export default function MerchantDashboard() {
 
     try {
       const result = await requestQrParkingPass({
-        visitorName: pendingQrPass.visitorName || "QR 방문자",
+        visitorName: qrPass.visitorName || "QR 방문자",
         parkingGateIds: selectedGateIds,
         parkingGateNames: selectedGateNames,
         parkingGates: selectedParkingGates,
-        validMinutes: Number(pendingQrPass.durationMinutes),
-        memo: pendingQrPass.memo || "",
-        usageLimit: Number(pendingQrPass.usageLimit || 1),
+        validMinutes: Number(qrPass.durationMinutes),
+        memo: qrPass.memo || "",
+        usageLimit: Number(qrPass.usageLimit || 1),
         ticketValidFrom: validFrom.toISOString(),
         ticketValidUntil: validUntil.toISOString(),
         merchant,
@@ -1298,23 +1301,23 @@ export default function MerchantDashboard() {
       const inviteCode = result.inviteCode || result.code || inviteId;
       const inviteUrl = deepLinkFor("", inviteId, inviteCode);
 
-      const { history, visitCount, ...newQrPass } = pendingQrPass;
+      const { history, visitCount, ...newQrPass } = qrPass;
       const newQrInvite = sanitizeInvite({
         ...newQrPass,
         id: inviteId,
         inviteId,
         inviteCode,
-        visitorName: pendingQrPass.visitorName || "QR 방문자",
+        visitorName: qrPass.visitorName || "QR 방문자",
         phone: "QR 스캔 발급",
         shopName: merchant.shopName,
         parkingGateIds: selectedGateIds,
         parkingGateNames: selectedGateNames,
         parkingGates: selectedParkingGates,
-        durationMinutes: Number(pendingQrPass.durationMinutes),
-        expiresAt: futureIso(Number(pendingQrPass.durationMinutes)),
+        durationMinutes: Number(qrPass.durationMinutes),
+        expiresAt: futureIso(Number(qrPass.durationMinutes)),
         ticketValidFrom: validFrom.toISOString(),
         ticketValidUntil: validUntil.toISOString(),
-        usageLimit: Number(pendingQrPass.usageLimit || 1),
+        usageLimit: Number(qrPass.usageLimit || 1),
         status: "발행 완료",
         issueMethod: "qr",
         createdAt: nowIso(),
@@ -1604,7 +1607,7 @@ export default function MerchantDashboard() {
               </button>
               <button
                 type="button"
-                onClick={confirmIssueQrPass}
+                onClick={() => confirmIssueQrPass()}
                 disabled={qrBusy}
                 className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[12px] font-medium text-white shadow-sm hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -1630,69 +1633,49 @@ export default function MerchantDashboard() {
             </div>
           ) : null}
 
-          {pendingQrPass ? (
-            <div className="space-y-4 rounded-2xl border bg-slate-50 p-4 text-sm">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <p>
-                  <span className="font-medium text-slate-700">방문자명:</span> {pendingQrPass.visitorName}
-                </p>
-                <p>
-                  <span className="font-medium text-slate-700">유효시간:</span> {displayDuration(pendingQrPass.durationMinutes)}
-                </p>
-                <p className="sm:col-span-2">
-                  <span className="font-medium text-slate-700">대상 차단기:</span> {pendingQrPass.parkingGateNames.join(", ")}
-                </p>
-                <label className="sm:col-span-2">
-                  <span className="mb-1 block font-medium text-slate-700">주차권 사용 시작</span>
-                  <input
-                    type="datetime-local"
-                    value={toDateTimeLocalValue(pendingQrPass.ticketValidFrom)}
-                    onChange={(e) => setPendingQrPass((prev) => (prev ? { ...prev, ticketValidFrom: e.target.value } : prev))}
-                    className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
-                  />
-                </label>
-                <label className="sm:col-span-2">
-                  <span className="mb-1 block font-medium text-slate-700">주차권 사용 종료</span>
-                  <input
-                    type="datetime-local"
-                    value={toDateTimeLocalValue(pendingQrPass.ticketValidUntil)}
-                    onChange={(e) => setPendingQrPass((prev) => (prev ? { ...prev, ticketValidUntil: e.target.value } : prev))}
-                    className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
-                  />
-                </label>
-              </div>
-
-              <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPendingQrPass(null);
-                    setQrModalOpen(false);
-                  }}
-                  className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-white"
-                >
-                  취소
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmIssueQrPass}
-                  disabled={qrBusy}
-                  className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {qrBusy ? "QR 서버 등록 중..." : "QR Code 발행"}
-                </button>
-              </div>
+          {pendingQrPass && !qrTicket ? (
+            <div className="rounded-2xl border bg-slate-50 p-4 text-sm text-slate-600">
+              QR Code를 서버에 등록하는 중입니다...
             </div>
           ) : null}
 
           {qrTicket ? (
             <>
-              <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2">
-                <p><span className="font-medium text-slate-700">방문자명:</span> {qrTicket.visitorName}</p>
-                <p><span className="font-medium text-slate-700">상태:</span> 서버 등록 완료</p>
-                <p className="sm:col-span-2"><span className="font-medium text-slate-700">대상 차단기:</span> {qrTicket.parkingGateNames.join(", ")}</p>
-                <p><span className="font-medium text-slate-700">유효시간:</span> {displayDuration(qrTicket.durationMinutes)}</p>
-                <p className="sm:col-span-2"><span className="font-medium text-slate-700">주차권 사용기간:</span> {displayDate(qrTicket.ticketValidFrom)} ~ {displayDate(qrTicket.ticketValidUntil)}</p>
+              <div className="space-y-4 rounded-2xl bg-slate-50 p-4 text-sm">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <p><span className="font-medium text-slate-700">방문자명:</span> {qrTicket.visitorName}</p>
+                  <p><span className="font-medium text-slate-700">상태:</span> 서버 등록 완료</p>
+                  <p className="sm:col-span-2"><span className="font-medium text-slate-700">대상 차단기:</span> {qrTicket.parkingGateNames.join(", ")}</p>
+                  <p><span className="font-medium text-slate-700">유효시간:</span> {displayDuration(qrTicket.durationMinutes)}</p>
+                  <label>
+                    <span className="mb-1 block font-medium text-slate-700">주차권 사용 시작</span>
+                    <input
+                      type="datetime-local"
+                      value={toDateTimeLocalValue(qrTicket.ticketValidFrom)}
+                      onChange={(e) => setQrTicket((prev) => (prev ? { ...prev, ticketValidFrom: e.target.value } : prev))}
+                      className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                    />
+                  </label>
+                  <label>
+                    <span className="mb-1 block font-medium text-slate-700">주차권 사용 종료</span>
+                    <input
+                      type="datetime-local"
+                      value={toDateTimeLocalValue(qrTicket.ticketValidUntil)}
+                      onChange={(e) => setQrTicket((prev) => (prev ? { ...prev, ticketValidUntil: e.target.value } : prev))}
+                      className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                    />
+                  </label>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => confirmIssueQrPass(qrTicket)}
+                    disabled={qrBusy || qrTicketUsed}
+                    className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {qrBusy ? "QR 재발행 중..." : "유효기간 적용 후 QR 재발행"}
+                  </button>
+                </div>
               </div>
 
               <div className="rounded-2xl border p-4">
