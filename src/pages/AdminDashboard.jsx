@@ -84,6 +84,93 @@ function buildParkingGatesWithMac(merchant, gateId, macAddress) {
   );
 }
 
+
+function getSubscriptionEndValue(item) {
+  return (
+    item?.subscriptionEndAt ||
+    item?.subscriptionEndDate ||
+    item?.expireAt ||
+    item?.expiredAt ||
+    item?.validUntil ||
+    item?.serviceEndAt ||
+    item?.endAt ||
+    ""
+  );
+}
+
+function getSubscriptionStartValue(item) {
+  return (
+    item?.subscriptionStartAt ||
+    item?.subscriptionStartDate ||
+    item?.validFrom ||
+    item?.serviceStartAt ||
+    item?.startAt ||
+    ""
+  );
+}
+
+function getSubscriptionStatus(item) {
+  const endValue = getSubscriptionEndValue(item);
+  if (!endValue) {
+    return {
+      key: "missing",
+      label: "기간 미설정",
+      badgeClass: "border-slate-200 bg-slate-50 text-slate-600",
+      daysLeft: null,
+      endDate: null,
+    };
+  }
+
+  const endDate = new Date(endValue);
+  if (Number.isNaN(endDate.getTime())) {
+    return {
+      key: "missing",
+      label: "기간 확인 필요",
+      badgeClass: "border-slate-200 bg-slate-50 text-slate-600",
+      daysLeft: null,
+      endDate: null,
+    };
+  }
+
+  const now = new Date();
+  const daysLeft = Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (daysLeft < 0) {
+    return {
+      key: "expired",
+      label: `만료 ${Math.abs(daysLeft)}일 경과`,
+      badgeClass: "border-rose-200 bg-rose-50 text-rose-700",
+      daysLeft,
+      endDate,
+    };
+  }
+
+  if (daysLeft <= 7) {
+    return {
+      key: "expiring",
+      label: daysLeft === 0 ? "오늘 만료" : `${daysLeft}일 이내 만료`,
+      badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+      daysLeft,
+      endDate,
+    };
+  }
+
+  return {
+    key: "active",
+    label: "정상",
+    badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    daysLeft,
+    endDate,
+  };
+}
+
+function merchantDisplayName(item) {
+  const loginId = item?.loginId || item?.email || item?.merchantId || "-";
+  const building = item?.buildingName || "상가명 없음";
+  const room = item?.roomNo ? ` / ${item.roomNo}` : "";
+  return `${building}${room} (${loginId})`;
+}
+
 export default function AdminDashboard() {
   const navigate = useNavigate();
 
@@ -107,6 +194,26 @@ export default function AdminDashboard() {
       );
     });
   }, [merchantItems, query]);
+
+  const expireAlert = useMemo(() => {
+    const rows = merchantItems.map((item) => ({
+      item,
+      status: getSubscriptionStatus(item),
+    }));
+
+    const expired = rows.filter((row) => row.status.key === "expired");
+    const expiring = rows.filter((row) => row.status.key === "expiring");
+    const missing = rows.filter((row) => row.status.key === "missing");
+    const attentionList = [...expired, ...expiring]
+      .sort((a, b) => {
+        const aTime = a.status.endDate?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
+        const bTime = b.status.endDate?.getTime?.() ?? Number.MAX_SAFE_INTEGER;
+        return aTime - bTime;
+      })
+      .slice(0, 8);
+
+    return { expired, expiring, missing, attentionList };
+  }, [merchantItems]);
 
   async function apiFetch(path, options = {}) {
     const token = await getIdToken();
@@ -322,6 +429,57 @@ export default function AdminDashboard() {
         )}
 
         <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h2 className="text-xl font-bold">사용기간 알림</h2>
+              <p className="mt-2 text-sm text-slate-600">
+                만료되었거나 7일 이내 만료 예정인 상가를 확인할 수 있습니다.
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center text-sm">
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
+                <div className="text-xs font-semibold text-rose-600">만료</div>
+                <div className="mt-1 text-2xl font-bold text-rose-700">{expireAlert.expired.length}</div>
+              </div>
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <div className="text-xs font-semibold text-amber-700">7일 이내</div>
+                <div className="mt-1 text-2xl font-bold text-amber-700">{expireAlert.expiring.length}</div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold text-slate-600">기간 미설정</div>
+                <div className="mt-1 text-2xl font-bold text-slate-700">{expireAlert.missing.length}</div>
+              </div>
+            </div>
+          </div>
+
+          {expireAlert.attentionList.length > 0 ? (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-2 text-sm font-semibold text-slate-700">만료/만료 예정 상가</div>
+              <div className="space-y-2">
+                {expireAlert.attentionList.map(({ item, status }) => (
+                  <div
+                    key={item.merchantId}
+                    className="flex flex-col gap-2 rounded-xl bg-white px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="font-semibold text-slate-800">{merchantDisplayName(item)}</div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                      <span className={`rounded-full border px-2 py-1 font-semibold ${status.badgeClass}`}>
+                        {status.label}
+                      </span>
+                      <span>종료일: {formatDate(getSubscriptionEndValue(item))}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+              만료 또는 7일 이내 만료 예정인 상가가 없습니다.
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold">상가 가입 신청 관리</h2>
@@ -400,7 +558,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[1080px] table-fixed text-left text-sm">
+            <table className="w-full min-w-[1220px] table-fixed text-left text-sm">
               <thead className="border-b text-slate-500">
                 <tr>
                   <th className="w-[95px] py-3">아이디</th>
@@ -408,6 +566,7 @@ export default function AdminDashboard() {
                   <th className="w-[55px]">호실</th>
                   <th className="w-[120px]">요금제</th>
                   <th className="w-[150px]">사용 횟수</th>
+                  <th className="w-[150px]">사용기간 상태</th>
                   <th className="w-[165px]">주차권 추가</th>
                   <th className="w-[260px]">차단기 MAC 주소</th>
                   <th className="w-[140px]">관리</th>
@@ -416,7 +575,7 @@ export default function AdminDashboard() {
               <tbody>
                 {filteredMerchants.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="py-6 text-center text-slate-500">
+                    <td colSpan="9" className="py-6 text-center text-slate-500">
                       가입된 사용자가 없습니다.
                     </td>
                   </tr>
@@ -451,6 +610,21 @@ export default function AdminDashboard() {
                             </div>
                           )}
                         </div>
+                      </td>
+                      <td>
+                        {(() => {
+                          const status = getSubscriptionStatus(item);
+                          return (
+                            <div className="space-y-1 whitespace-nowrap">
+                              <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${status.badgeClass}`}>
+                                {status.label}
+                              </span>
+                              <div className="text-xs text-slate-500">
+                                종료: {formatDate(getSubscriptionEndValue(item))}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="py-3">
                         <div className="flex min-w-[150px] items-center gap-2">
