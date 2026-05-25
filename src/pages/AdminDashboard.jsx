@@ -92,6 +92,7 @@ export default function AdminDashboard() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [ticketAddInputs, setTicketAddInputs] = useState({});
 
   const filteredMerchants = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -213,6 +214,16 @@ export default function AdminDashboard() {
   }
 
 
+  function getAdditionalPasses(item) {
+    return Number(item?.additionalPasses || item?.extraPasses || item?.addedPasses || 0);
+  }
+
+  function getMonthlyTotalLimit(item) {
+    if (item?.planLimit === -1 || item?.planLimit === "unlimited") return -1;
+    const monthlyQuota = Number(item?.monthlyQuota ?? item?.planLimit ?? 0);
+    return monthlyQuota + getAdditionalPasses(item);
+  }
+
   async function addParkingTickets(item) {
     if (!item?.merchantId) return;
 
@@ -221,24 +232,42 @@ export default function AdminDashboard() {
       return;
     }
 
-    const currentLimit = Number(item.planLimit || 0);
-    const input = window.prompt("추가할 주차권 수량을 입력하세요.", "100");
-    if (input === null) return;
+    const rawValue = ticketAddInputs[item.merchantId] ?? "";
+    const addCount = Number(rawValue);
 
-    const addCount = Number(input);
     if (!Number.isInteger(addCount) || addCount <= 0) {
-      alert("추가할 주차권 수량은 1 이상의 정수로 입력해야 합니다.");
+      alert("추가할 주차권 수량을 1 이상의 정수로 입력해 주세요.");
       return;
     }
 
-    const nextLimit = currentLimit + addCount;
+    const currentAdditionalPasses = getAdditionalPasses(item);
+    const nextAdditionalPasses = currentAdditionalPasses + addCount;
+
     const ok = window.confirm(
-      `현재 한도 ${currentLimit}장에 ${addCount}장을 추가하여 총 ${nextLimit}장으로 변경하시겠습니까?`
+      `이번 달 추가 주차권에 ${addCount}장을 추가하시겠습니까?\n현재 추가 주차권: ${currentAdditionalPasses}장 → 변경 후: ${nextAdditionalPasses}장`
     );
     if (!ok) return;
 
-    await updateMerchant(item.merchantId, { planLimit: nextLimit });
-    alert("주차권이 추가되었습니다.");
+    await updateMerchant(item.merchantId, { additionalPasses: nextAdditionalPasses });
+    setTicketAddInputs((prev) => ({ ...prev, [item.merchantId]: "" }));
+    alert("이번 달 사용 주차권에 추가되었습니다.");
+  }
+
+  async function resetPassword(merchantId) {
+    if (!window.confirm("해당 사용자의 비밀번호를 초기화하시겠습니까?")) return;
+
+    try {
+      setLoading(true);
+      await apiFetch(`/admin/merchants/${encodeURIComponent(merchantId)}/reset-password`, {
+        method: "POST",
+      });
+      alert("비밀번호 초기화가 요청되었습니다.");
+    } catch (err) {
+      console.error(err);
+      alert(err.message || "비밀번호 초기화 실패");
+    } finally {
+      setLoading(false);
+    }
   }
 
   const handleLogout = async () => {
@@ -318,7 +347,7 @@ export default function AdminDashboard() {
               <tbody>
                 {pendingItems.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="py-6 text-center text-slate-500">
+                    <td colSpan="6" className="py-6 text-center text-slate-500">
                       가입 신청 내역이 없습니다.
                     </td>
                   </tr>
@@ -371,7 +400,7 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[980px] text-left text-sm">
+            <table className="w-full min-w-[1180px] text-left text-sm">
               <thead className="border-b text-slate-500">
                 <tr>
                   <th className="py-3">아이디</th>
@@ -379,6 +408,7 @@ export default function AdminDashboard() {
                   <th>호실</th>
                   <th>요금제</th>
                   <th>사용 횟수</th>
+                  <th>주차권 추가</th>
                   <th>차단기 MAC 주소</th>
                   <th className="w-[190px]">활성화</th>
                 </tr>
@@ -386,7 +416,7 @@ export default function AdminDashboard() {
               <tbody>
                 {filteredMerchants.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="py-6 text-center text-slate-500">
+                    <td colSpan="8" className="py-6 text-center text-slate-500">
                       가입된 사용자가 없습니다.
                     </td>
                   </tr>
@@ -397,31 +427,57 @@ export default function AdminDashboard() {
                       <td>{item.buildingName || "-"}</td>
                       <td>{item.roomNo || "-"}</td>
                       <td>
-                        <div className="flex flex-col gap-2">
-                          <select
-                            value={item.planLimit === -1 ? "unlimited" : item.planLimit}
-                            onChange={(e) => updateMerchant(item.merchantId, { planLimit: e.target.value })}
-                            className="rounded-xl border px-3 py-2"
-                            disabled={loading}
-                          >
-                            {PLAN_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
-                                {option === "unlimited" ? "무제한" : option}
-                              </option>
-                            ))}
-                          </select>
+                        <select
+                          value={item.planLimit === -1 ? "unlimited" : item.planLimit}
+                          onChange={(e) => updateMerchant(item.merchantId, { planLimit: e.target.value })}
+                          className="rounded-xl border px-3 py-2"
+                          disabled={loading}
+                        >
+                          {PLAN_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option === "unlimited" ? "무제한" : option}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <div className="whitespace-nowrap">
+                          <div>
+                            {item.usedCount || 0} / {getMonthlyTotalLimit(item) === -1 ? "무제한" : `${getMonthlyTotalLimit(item)}건`}
+                          </div>
+                          {getMonthlyTotalLimit(item) !== -1 && getAdditionalPasses(item) > 0 && (
+                            <div className="text-xs text-slate-500">
+                              기본 {item.monthlyQuota ?? item.planLimit ?? 0}건 + 추가 {getAdditionalPasses(item)}건
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3">
+                        <div className="flex min-w-[150px] items-center gap-2">
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={ticketAddInputs[item.merchantId] || ""}
+                            onChange={(e) =>
+                              setTicketAddInputs((prev) => ({
+                                ...prev,
+                                [item.merchantId]: e.target.value,
+                              }))
+                            }
+                            placeholder="수량"
+                            className="w-20 rounded-xl border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                            disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
+                          />
                           <button
                             type="button"
                             onClick={() => addParkingTickets(item)}
-                            className="rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                            className="rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
                             disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
                           >
-                            주차권 추가
+                            추가
                           </button>
                         </div>
-                      </td>
-                      <td>
-                        {item.usedCount || 0} / {planLabel(item.planLimit)}
                       </td>
                       <td className="py-3">
                         <div className="grid min-w-[250px] grid-cols-1 gap-2">
