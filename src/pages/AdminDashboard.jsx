@@ -21,6 +21,74 @@ function formatDate(value) {
     return "-";
   }
 }
+function getSubscriptionEndAt(item) {
+  return (
+    item?.subscriptionEndAt ||
+    item?.serviceEndAt ||
+    item?.planEndAt ||
+    item?.validUntil ||
+    item?.expiresAt ||
+    ""
+  );
+}
+
+function getExpireInfo(item) {
+  const endAt = getSubscriptionEndAt(item);
+  if (!endAt) {
+    return {
+      endAt: "",
+      daysLeft: null,
+      status: "unknown",
+      label: "기간 미설정",
+      badgeClass: "border-slate-200 bg-slate-50 text-slate-600",
+    };
+  }
+
+  const end = new Date(endAt);
+  if (Number.isNaN(end.getTime())) {
+    return {
+      endAt,
+      daysLeft: null,
+      status: "unknown",
+      label: "기간 확인 필요",
+      badgeClass: "border-slate-200 bg-slate-50 text-slate-600",
+    };
+  }
+
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const endStart = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  const daysLeft = Math.ceil((endStart.getTime() - todayStart.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (daysLeft < 0) {
+    return {
+      endAt,
+      daysLeft,
+      status: "expired",
+      label: `만료 ${Math.abs(daysLeft)}일 경과`,
+      badgeClass: "border-rose-200 bg-rose-50 text-rose-700",
+    };
+  }
+
+  if (daysLeft <= 7) {
+    return {
+      endAt,
+      daysLeft,
+      status: "expiring",
+      label: daysLeft === 0 ? "오늘 만료" : `D-${daysLeft}`,
+      badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+    };
+  }
+
+  return {
+    endAt,
+    daysLeft,
+    status: "active",
+    label: `D-${daysLeft}`,
+    badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  };
+}
+
 
 async function getIdToken() {
   const session = await fetchAuthSession();
@@ -107,6 +175,21 @@ export default function AdminDashboard() {
       );
     });
   }, [merchantItems, query]);
+
+  const expireSummary = useMemo(() => {
+    const expired = [];
+    const expiring = [];
+    const unset = [];
+
+    merchantItems.forEach((item) => {
+      const info = getExpireInfo(item);
+      if (info.status === "expired") expired.push({ ...item, expireInfo: info });
+      else if (info.status === "expiring") expiring.push({ ...item, expireInfo: info });
+      else if (info.status === "unknown") unset.push({ ...item, expireInfo: info });
+    });
+
+    return { expired, expiring, unset };
+  }, [merchantItems]);
 
   async function apiFetch(path, options = {}) {
     const token = await getIdToken();
@@ -322,6 +405,64 @@ export default function AdminDashboard() {
         )}
 
         <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-xl font-bold">사용기간 알림</h2>
+              <p className="mt-2 text-sm text-slate-600">
+                만료되었거나 7일 이내 만료 예정인 상가를 먼저 확인할 수 있습니다.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-sm font-semibold">
+              <span className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">
+                만료 {expireSummary.expired.length}건
+              </span>
+              <span className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-amber-700">
+                7일 이내 {expireSummary.expiring.length}건
+              </span>
+              <span className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600">
+                기간 미설정 {expireSummary.unset.length}건
+              </span>
+            </div>
+          </div>
+
+          {expireSummary.expired.length + expireSummary.expiring.length === 0 ? (
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+              현재 만료 또는 7일 이내 만료 예정 상가는 없습니다.
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {[...expireSummary.expired, ...expireSummary.expiring]
+                .slice(0, 8)
+                .map((item) => (
+                  <div
+                    key={`expire-${item.merchantId}`}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate font-bold">
+                          {item.buildingName || item.loginId || item.email || item.merchantId}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {item.loginId || item.email || "-"} / {item.roomNo || "-"}
+                        </div>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full border px-3 py-1 text-xs font-bold ${item.expireInfo.badgeClass}`}
+                      >
+                        {item.expireInfo.label}
+                      </span>
+                    </div>
+                    <div className="mt-2 text-sm text-slate-700">
+                      사용기간 종료: {formatDate(item.expireInfo.endAt)}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold">상가 가입 신청 관리</h2>
@@ -376,7 +517,8 @@ export default function AdminDashboard() {
                         </button>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -388,7 +530,7 @@ export default function AdminDashboard() {
             <div>
               <h2 className="text-xl font-bold">가입 사용자 관리</h2>
               <p className="mt-2 text-sm text-slate-600">
-                승인된 사용자 목록입니다. 상가명 또는 아이디로 검색할 수 있습니다.
+                승인된 사용자 목록입니다. 사용기간 상태와 상가명 또는 아이디로 검색할 수 있습니다.
               </p>
             </div>
             <input
@@ -400,12 +542,13 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[1080px] table-fixed text-left text-sm">
+            <table className="w-full min-w-[1220px] table-fixed text-left text-sm">
               <thead className="border-b text-slate-500">
                 <tr>
                   <th className="w-[95px] py-3">아이디</th>
                   <th className="w-[95px]">상가명</th>
                   <th className="w-[55px]">호실</th>
+                  <th className="w-[130px]">사용기간</th>
                   <th className="w-[120px]">요금제</th>
                   <th className="w-[150px]">사용 횟수</th>
                   <th className="w-[165px]">주차권 추가</th>
@@ -416,16 +559,31 @@ export default function AdminDashboard() {
               <tbody>
                 {filteredMerchants.length === 0 ? (
                   <tr>
-                    <td colSpan="8" className="py-6 text-center text-slate-500">
+                    <td colSpan="9" className="py-6 text-center text-slate-500">
                       가입된 사용자가 없습니다.
                     </td>
                   </tr>
                 ) : (
-                  filteredMerchants.map((item) => (
+                  filteredMerchants.map((item) => {
+                    const expireInfo = getExpireInfo(item);
+
+                    return (
                     <tr key={item.merchantId} className="border-b last:border-0">
                       <td className="py-3 font-semibold">{item.loginId || item.email || item.merchantId}</td>
                       <td>{item.buildingName || "-"}</td>
                       <td>{item.roomNo || "-"}</td>
+                      <td>
+                        <div className="flex flex-col gap-1">
+                          <span
+                            className={`inline-flex w-fit rounded-full border px-2 py-1 text-xs font-bold ${expireInfo.badgeClass}`}
+                          >
+                            {expireInfo.label}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            {formatDate(expireInfo.endAt)}
+                          </span>
+                        </div>
+                      </td>
                       <td>
                         <select
                           value={item.planLimit === -1 ? "unlimited" : item.planLimit}
