@@ -619,6 +619,8 @@ export default function MerchantDashboard() {
   const [filter, setFilter] = useState("all");
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [pendingPass, setPendingPass] = useState(null);
+  const [pendingQrPass, setPendingQrPass] = useState(null);
+  const [qrConfirmModalOpen, setQrConfirmModalOpen] = useState(false);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const [barrierSectionOpen, setBarrierSectionOpen] = useState(false);
   const [apiStatus, setApiStatus] = useState("");
@@ -993,7 +995,14 @@ export default function MerchantDashboard() {
       return;
     }
 
-    const nextPendingPass = buildPendingPass({ form, merchant, invites });
+    const nextStart = localDateTimeNowValue();
+    const nextForm = {
+      ...form,
+      ticketValidFrom: nextStart,
+      ticketValidUntil: addMinutesToLocalDateTimeValue(nextStart, Number(form.durationMinutes || 60)),
+      customValidityRange: false,
+    };
+    const nextPendingPass = buildPendingPass({ form: nextForm, merchant, invites });
     setPendingPass(nextPendingPass);
     setConfirmModalOpen(true);
   }
@@ -1002,12 +1011,25 @@ export default function MerchantDashboard() {
     if (!pendingPass) return;
 
     setError("");
-    setApiStatus("서버에 초대 코드 발행 요청 중입니다...");
+
+    const validFrom = new Date(pendingPass.ticketValidFrom);
+    const validUntil = new Date(pendingPass.ticketValidUntil);
+    if (Number.isNaN(validFrom.getTime()) || Number.isNaN(validUntil.getTime())) {
+      setError("주차권 사용 시작일시와 종료일시를 확인해 주세요.");
+      return;
+    }
+
+    if (validUntil.getTime() <= validFrom.getTime()) {
+      setError("주차권 사용 종료일시는 시작일시보다 늦어야 합니다.");
+      return;
+    }
+
+    setApiStatus("서버에 주차권 코드 발행 요청 중입니다...");
 
     try {
       const result = await requestParkingPass({
         phone: "",
-        visitorName: "초대코드 방문자",
+        visitorName: "주차권 코드 방문자",
         parkingGateId: pendingPass.parkingGateIds[0],
         parkingGateIds: pendingPass.parkingGateIds,
         parkingGateNames: pendingPass.parkingGateNames,
@@ -1015,8 +1037,8 @@ export default function MerchantDashboard() {
         validMinutes: pendingPass.durationMinutes,
         memo: pendingPass.memo,
         usageLimit: pendingPass.usageLimit,
-        ticketValidFrom: pendingPass.ticketValidFrom,
-        ticketValidUntil: pendingPass.ticketValidUntil,
+        ticketValidFrom: validFrom.toISOString(),
+        ticketValidUntil: validUntil.toISOString(),
         issueMethod: "manual",
         deliveryMethod: "manual",
         merchantShopName: merchant.shopName,
@@ -1031,12 +1053,14 @@ export default function MerchantDashboard() {
       const { history, visitCount, ...newPass } = pendingPass;
       const savedInvite = sanitizeInvite({
         ...newPass,
+        ticketValidFrom: validFrom.toISOString(),
+        ticketValidUntil: validUntil.toISOString(),
         id: inviteId,
         inviteId,
         inviteCode,
         status: "발행 완료",
-        phone: "초대코드 직접 전달",
-        visitorName: "초대코드 방문자",
+        phone: "주차권 코드 직접 전달",
+        visitorName: "주차권 코드 방문자",
         issueMethod: "manual",
         serverSynced: true,
         serverInviteUrl: inviteUrl,
@@ -1052,11 +1076,11 @@ export default function MerchantDashboard() {
       setConfirmModalOpen(false);
       setPendingPass(null);
       setApiStatus("");
-      setToast("초대 코드가 발행되었습니다.");
+      setToast("주차권 코드가 발행되었습니다.");
       resetForm();
     } catch (err) {
       setApiStatus("");
-      setError(err?.message || "초대 코드 발행 중 오류가 발생했습니다.");
+      setError(err?.message || "주차권 코드 발행 중 오류가 발생했습니다.");
     }
   }
 
@@ -1066,10 +1090,10 @@ export default function MerchantDashboard() {
     try {
       await navigator.clipboard.writeText(code);
       setCopiedId(invite.id);
-      setToast("초대 코드를 복사했습니다.");
+      setToast("주차권 코드를 복사했습니다.");
       setTimeout(() => setCopiedId(""), 1500);
     } catch {
-      setError("초대 코드 복사에 실패했습니다.");
+      setError("주차권 코드 복사에 실패했습니다.");
     }
   }
 
@@ -1077,9 +1101,9 @@ export default function MerchantDashboard() {
     if (!issuedInvite?.inviteCode) return;
     try {
       await navigator.clipboard.writeText(issuedInvite.inviteCode);
-      setToast("초대 코드를 복사했습니다.");
+      setToast("주차권 코드를 복사했습니다.");
     } catch {
-      setError("초대 코드 복사에 실패했습니다.");
+      setError("주차권 코드 복사에 실패했습니다.");
     }
   }
 
@@ -1088,9 +1112,9 @@ export default function MerchantDashboard() {
     if (!value) return;
     try {
       await navigator.clipboard.writeText(value);
-      setToast("초대 링크를 복사했습니다.");
+      setToast("주차권 링크를 복사했습니다.");
     } catch {
-      setError("초대 링크 복사에 실패했습니다.");
+      setError("주차권 링크 복사에 실패했습니다.");
     }
   }
 
@@ -1098,7 +1122,7 @@ export default function MerchantDashboard() {
     if (!issuedInvite) return;
 
     setError("");
-    setApiStatus("서버에 새 초대 코드 발행 요청 중입니다...");
+    setApiStatus("서버에 새 주차권 코드 발행 요청 중입니다...");
 
     try {
       const parkingGateIds = normalizeGateIds(issuedInvite.parkingGateIds);
@@ -1107,17 +1131,20 @@ export default function MerchantDashboard() {
           ? issuedInvite.parkingGateNames
           : gateNamesFromIds(parkingGateIds, merchant.parkingGates);
 
+      const nextStart = localDateTimeNowValue();
+      const nextEnd = addMinutesToLocalDateTimeValue(nextStart, Number(issuedInvite.durationMinutes || 60));
+
       const result = await requestParkingPass({
         phone: "",
-        visitorName: "초대코드 방문자",
+        visitorName: "주차권 코드 방문자",
         parkingGateId: parkingGateIds[0],
         parkingGateIds,
         parkingGateNames,
         validMinutes: Number(issuedInvite.durationMinutes || 60),
         memo: issuedInvite.memo || "",
         usageLimit: Number(issuedInvite.usageLimit || 1),
-        ticketValidFrom: issuedInvite.ticketValidFrom,
-        ticketValidUntil: issuedInvite.ticketValidUntil,
+        ticketValidFrom: new Date(nextStart).toISOString(),
+        ticketValidUntil: new Date(nextEnd).toISOString(),
         issueMethod: "manual",
         deliveryMethod: "manual",
         merchantShopName: merchant.shopName,
@@ -1135,9 +1162,11 @@ export default function MerchantDashboard() {
         inviteId,
         inviteCode,
         status: "발행 완료",
-        phone: "초대코드 직접 전달",
-        visitorName: "초대코드 방문자",
+        phone: "주차권 코드 직접 전달",
+        visitorName: "주차권 코드 방문자",
         issueMethod: "manual",
+        ticketValidFrom: new Date(nextStart).toISOString(),
+        ticketValidUntil: new Date(nextEnd).toISOString(),
         createdAt: nowIso(),
         serverSynced: true,
         serverInviteUrl: inviteUrl,
@@ -1151,15 +1180,15 @@ export default function MerchantDashboard() {
         inviteUrl,
       });
       setApiStatus("");
-      setToast("새 초대 코드가 발행되었습니다.");
+      setToast("새 주차권 코드가 발행되었습니다.");
     } catch (err) {
       setApiStatus("");
-      setError(err?.message || "새 초대 코드 발행 중 오류가 발생했습니다.");
+      setError(err?.message || "새 주차권 코드 발행 중 오류가 발생했습니다.");
     }
   }
 
 
-  async function handleIssueQrPass() {
+  function handleIssueQrPass() {
     setError("");
 
     if (!canIssueParkingPass) {
@@ -1192,8 +1221,30 @@ export default function MerchantDashboard() {
       return;
     }
 
-    const validFrom = new Date(form.ticketValidFrom);
-    const validUntil = new Date(form.ticketValidUntil);
+    const nextStart = localDateTimeNowValue();
+    const nextForm = {
+      ...form,
+      visitorName: form.visitorName.trim() || "QR 방문자",
+      ticketValidFrom: nextStart,
+      ticketValidUntil: addMinutesToLocalDateTimeValue(nextStart, Number(form.durationMinutes || 60)),
+      customValidityRange: false,
+    };
+
+    const nextPendingQrPass = buildPendingPass({ form: nextForm, merchant, invites });
+    setPendingQrPass({
+      ...nextPendingQrPass,
+      visitorName: form.visitorName.trim() || "QR 방문자",
+      phone: "QR 스캔 발급",
+      issueMethod: "qr",
+    });
+    setQrConfirmModalOpen(true);
+  }
+
+  async function confirmIssueQrPass() {
+    if (!pendingQrPass) return;
+
+    const validFrom = new Date(pendingQrPass.ticketValidFrom);
+    const validUntil = new Date(pendingQrPass.ticketValidUntil);
     if (Number.isNaN(validFrom.getTime()) || Number.isNaN(validUntil.getTime())) {
       setError("주차권 사용 시작일시와 종료일시를 확인해 주세요.");
       return;
@@ -1204,22 +1255,28 @@ export default function MerchantDashboard() {
       return;
     }
 
-    const selectedGateIds = normalizeGateIds(form.selectedGateIds);
-    const selectedGateNames = gateNamesFromIds(selectedGateIds, merchant.parkingGates);
-    const selectedParkingGates = parkingGatesFromIds(selectedGateIds, merchant.parkingGates);
+    const selectedGateIds = normalizeGateIds(pendingQrPass.parkingGateIds);
+    const selectedGateNames =
+      Array.isArray(pendingQrPass.parkingGateNames) && pendingQrPass.parkingGateNames.length > 0
+        ? pendingQrPass.parkingGateNames
+        : gateNamesFromIds(selectedGateIds, merchant.parkingGates);
+    const selectedParkingGates =
+      Array.isArray(pendingQrPass.parkingGates) && pendingQrPass.parkingGates.length > 0
+        ? pendingQrPass.parkingGates
+        : parkingGatesFromIds(selectedGateIds, merchant.parkingGates);
 
     setQrBusy(true);
     setApiStatus("서버에 QR 주차권 등록 요청 중입니다...");
 
     try {
       const result = await requestQrParkingPass({
-        visitorName: form.visitorName.trim() || "QR 방문자",
+        visitorName: pendingQrPass.visitorName || "QR 방문자",
         parkingGateIds: selectedGateIds,
         parkingGateNames: selectedGateNames,
         parkingGates: selectedParkingGates,
-        validMinutes: Number(form.durationMinutes),
-        memo: form.memo.trim(),
-        usageLimit,
+        validMinutes: Number(pendingQrPass.durationMinutes),
+        memo: pendingQrPass.memo || "",
+        usageLimit: Number(pendingQrPass.usageLimit || 1),
         ticketValidFrom: validFrom.toISOString(),
         ticketValidUntil: validUntil.toISOString(),
         merchant,
@@ -1229,22 +1286,23 @@ export default function MerchantDashboard() {
       const inviteCode = result.inviteCode || result.code || inviteId;
       const inviteUrl = deepLinkFor("", inviteId, inviteCode);
 
+      const { history, visitCount, ...newQrPass } = pendingQrPass;
       const newQrInvite = sanitizeInvite({
+        ...newQrPass,
         id: inviteId,
         inviteId,
         inviteCode,
-        visitorName: form.visitorName.trim() || "QR 방문자",
+        visitorName: pendingQrPass.visitorName || "QR 방문자",
         phone: "QR 스캔 발급",
         shopName: merchant.shopName,
         parkingGateIds: selectedGateIds,
         parkingGateNames: selectedGateNames,
         parkingGates: selectedParkingGates,
-        memo: form.memo.trim(),
-        durationMinutes: Number(form.durationMinutes),
-        expiresAt: futureIso(Number(form.durationMinutes)),
+        durationMinutes: Number(pendingQrPass.durationMinutes),
+        expiresAt: futureIso(Number(pendingQrPass.durationMinutes)),
         ticketValidFrom: validFrom.toISOString(),
         ticketValidUntil: validUntil.toISOString(),
-        usageLimit,
+        usageLimit: Number(pendingQrPass.usageLimit || 1),
         status: "발행 완료",
         issueMethod: "qr",
         createdAt: nowIso(),
@@ -1260,8 +1318,11 @@ export default function MerchantDashboard() {
       });
       setQrTicketUsed(false);
       setQrModalOpen(true);
+      setQrConfirmModalOpen(false);
+      setPendingQrPass(null);
       setToast("QR 주차권이 서버에 등록되었습니다.");
       setApiStatus("");
+      resetForm();
     } catch (err) {
       setApiStatus("");
       setError(err?.message || "QR 주차권 등록 중 오류가 발생했습니다.");
@@ -1309,6 +1370,8 @@ export default function MerchantDashboard() {
     setQrTicket(null);
     setQrTicketUsed(false);
     setQrModalOpen(false);
+    setPendingQrPass(null);
+    setQrConfirmModalOpen(false);
 
     setFavoriteModalOpen(false);
     setIssuedInvite(null);
@@ -1362,7 +1425,7 @@ export default function MerchantDashboard() {
 
       <Modal
         open={confirmModalOpen}
-        title="초대 코드 발행 확인"
+        title="주차권 코드 발행 확인"
         onClose={() => {
           setConfirmModalOpen(false);
           setPendingPass(null);
@@ -1377,9 +1440,24 @@ export default function MerchantDashboard() {
               <p>
                 <span className="font-medium text-slate-700">유효시간:</span> {displayDuration(pendingPass.durationMinutes)}
               </p>
-              <p className="sm:col-span-2">
-                <span className="font-medium text-slate-700">주차권 사용기간:</span> {displayDate(pendingPass.ticketValidFrom)} ~ {displayDate(pendingPass.ticketValidUntil)}
-              </p>
+              <label className="sm:col-span-2">
+                <span className="mb-1 block font-medium text-slate-700">주차권 사용 시작</span>
+                <input
+                  type="datetime-local"
+                  value={toDateTimeLocalValue(pendingPass.ticketValidFrom)}
+                  onChange={(e) => setPendingPass((prev) => (prev ? { ...prev, ticketValidFrom: e.target.value } : prev))}
+                  className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                />
+              </label>
+              <label className="sm:col-span-2">
+                <span className="mb-1 block font-medium text-slate-700">주차권 사용 종료</span>
+                <input
+                  type="datetime-local"
+                  value={toDateTimeLocalValue(pendingPass.ticketValidUntil)}
+                  onChange={(e) => setPendingPass((prev) => (prev ? { ...prev, ticketValidUntil: e.target.value } : prev))}
+                  className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                />
+              </label>
             </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
@@ -1398,7 +1476,7 @@ export default function MerchantDashboard() {
                 onClick={confirmIssuePass}
                 className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[12px] font-medium text-white shadow-sm hover:opacity-90"
               >
-                확인 후 초대코드 발행
+                확인 후 주차권 코드 발행
               </button>
             </div>
           </div>
@@ -1407,18 +1485,18 @@ export default function MerchantDashboard() {
 
       <Modal
         open={inviteResultModalOpen}
-        title="초대 코드 발행 완료"
+        title="주차권 코드 발행 완료"
         onClose={() => setInviteResultModalOpen(false)}
       >
         {issuedInvite ? (
           <div className="space-y-4">
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center">
-              <p className="text-sm font-semibold text-emerald-800">초대 코드가 발행되었습니다.</p>
+              <p className="text-sm font-semibold text-emerald-800">주차권 코드가 발행되었습니다.</p>
               <div className="mt-3 rounded-xl bg-white px-4 py-4 text-3xl font-black tracking-widest text-slate-900 ring-1 ring-emerald-100">
                 {issuedInvite.inviteCode || "-"}
               </div>
               <p className="mt-3 text-xs leading-relaxed text-emerald-800">
-                방문자에게 초대 코드를 직접 전달해 주세요. 전화번호/SMS는 사용하지 않습니다.
+                방문자에게 주차권 코드를 직접 전달해 주세요. 전화번호/SMS는 사용하지 않습니다.
               </p>
             </div>
 
@@ -1428,14 +1506,14 @@ export default function MerchantDashboard() {
                 onClick={copyIssuedInviteCode}
                 className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:opacity-90"
               >
-                초대 코드 복사
+                주차권 코드 복사
               </button>
               <button
                 type="button"
                 onClick={copyIssuedInviteLink}
                 className="rounded-xl border border-emerald-300 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
               >
-                초대 링크 복사
+                주차권 링크 복사
               </button>
             </div>
 
@@ -1445,7 +1523,7 @@ export default function MerchantDashboard() {
               disabled={Boolean(apiStatus)}
               className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {apiStatus ? "새 초대 코드 발행 중..." : "같은 조건으로 새 초대 코드 발행"}
+              {apiStatus ? "새 주차권 코드 발행 중..." : "같은 조건으로 새 주차권 코드 발행"}
             </button>
 
             <button
@@ -1459,9 +1537,74 @@ export default function MerchantDashboard() {
         ) : null}
       </Modal>
 
+
+      <Modal
+        open={qrConfirmModalOpen}
+        title="QR 주차권 발행 확인"
+        onClose={() => {
+          setQrConfirmModalOpen(false);
+          setPendingQrPass(null);
+        }}
+      >
+        {pendingQrPass ? (
+          <div className="space-y-5">
+            <div className="grid gap-3 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2">
+              <p>
+                <span className="font-medium text-slate-700">방문자명:</span> {pendingQrPass.visitorName}
+              </p>
+              <p>
+                <span className="font-medium text-slate-700">유효시간:</span> {displayDuration(pendingQrPass.durationMinutes)}
+              </p>
+              <p className="sm:col-span-2">
+                <span className="font-medium text-slate-700">대상 차단기:</span> {pendingQrPass.parkingGateNames.join(", ")}
+              </p>
+              <label className="sm:col-span-2">
+                <span className="mb-1 block font-medium text-slate-700">주차권 사용 시작</span>
+                <input
+                  type="datetime-local"
+                  value={toDateTimeLocalValue(pendingQrPass.ticketValidFrom)}
+                  onChange={(e) => setPendingQrPass((prev) => (prev ? { ...prev, ticketValidFrom: e.target.value } : prev))}
+                  className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                />
+              </label>
+              <label className="sm:col-span-2">
+                <span className="mb-1 block font-medium text-slate-700">주차권 사용 종료</span>
+                <input
+                  type="datetime-local"
+                  value={toDateTimeLocalValue(pendingQrPass.ticketValidUntil)}
+                  onChange={(e) => setPendingQrPass((prev) => (prev ? { ...prev, ticketValidUntil: e.target.value } : prev))}
+                  className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-slate-400"
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setQrConfirmModalOpen(false);
+                  setPendingQrPass(null);
+                }}
+                className="rounded-lg border px-2.5 py-1.5 text-[12px] font-medium hover:bg-slate-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={confirmIssueQrPass}
+                disabled={qrBusy}
+                className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[12px] font-medium text-white shadow-sm hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {qrBusy ? "QR 서버 등록 중..." : "확인 후 QR Code 발행"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
       <Modal
         open={qrModalOpen}
-        title="QR 초대 코드 발행"
+        title="QR 주차권 코드 발행"
         onClose={() => setQrModalOpen(false)}
       >
         {qrTicket ? (
@@ -1638,7 +1781,7 @@ export default function MerchantDashboard() {
           <form onSubmit={handleOpenConfirm} className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
             <div className="mb-3 flex items-start justify-between gap-2">
               <div>
-                <h2 className="text-lg font-semibold sm:text-xl">방문자 초대 코드 발행</h2>
+                <h2 className="text-lg font-semibold sm:text-xl">방문자 주차권 코드 발행</h2>
                 <p className="mt-1 text-sm text-slate-500">
                   유효시간은 방문자가 실제로 주차권을 사용한 시점부터 적용됩니다.
                 </p>
@@ -1679,41 +1822,8 @@ export default function MerchantDashboard() {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 col-span-2">
-                <div className="grid grid-cols-[1fr_auto] gap-1.5">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">시작</label>
-                    <input
-                      type="datetime-local"
-                      value={form.ticketValidFrom}
-                      onChange={(e) => handleChange("ticketValidFrom", e.target.value)}
-                      className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[11px] outline-none focus:border-slate-400"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => applyDefaultValidityRange(form.durationMinutes)}
-                    className="rounded-md border px-2 py-1 text-[11px] font-medium hover:bg-slate-50 whitespace-nowrap"
-                  >
-                    현재 기준
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-1.5 py-1 col-span-2">
-                <div className="flex items-center gap-1.5">
-                  <label className="w-12 shrink-0 text-[11px] font-medium text-slate-700">종료</label>
-                  <input
-                    type="datetime-local"
-                    value={form.ticketValidUntil}
-                    onChange={(e) => handleChange("ticketValidUntil", e.target.value)}
-                    className="min-w-0 flex-1 rounded-md border bg-white px-1.5 py-1 text-[11px] outline-none focus:border-slate-400"
-                  />
-                </div>
-              </div>
-
               <p className="col-span-2 text-[10px] leading-tight text-slate-500">
-                유효시간은 실제 사용 시점부터 적용됩니다. 시작/종료일시를 직접 수정하지 않으면 현재 시각 기준으로 자동 반영됩니다.
+                시작/종료일시는 발행 버튼을 누른 뒤 팝업에서 현재 시각 기준으로 표시되며, 필요 시 수정할 수 있습니다.
               </p>
             </div>
 
@@ -1799,7 +1909,7 @@ export default function MerchantDashboard() {
                 disabled={!canIssueParkingPass}
                 className="flex w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-3 text-[15px] font-semibold text-white shadow-sm hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 sm:py-3.5"
               >
-                {canIssueParkingPass ? "초대 코드 발행" : "승인 후 발행 가능"}
+                {canIssueParkingPass ? "주차권 코드 발행" : "승인 후 발행 가능"}
               </button>
               <button
                 type="button"
@@ -1884,7 +1994,7 @@ export default function MerchantDashboard() {
                             <p className="sm:col-span-2">주차권 사용기간: {displayDate(row.ticketValidFrom)} ~ {displayDate(row.ticketValidUntil)}</p>
                             <p className="sm:col-span-2">메모: {row.memo || "-"}</p>
                             <p className="break-all sm:col-span-2">
-                              초대 링크: {deepLinkFor("", row.inviteId || row.id, row.inviteCode)}
+                              주차권 링크: {deepLinkFor("", row.inviteId || row.id, row.inviteCode)}
                             </p>
                           </div>
                         </div>
@@ -1895,7 +2005,7 @@ export default function MerchantDashboard() {
                             onClick={() => copyLink(row)}
                             className="rounded-2xl border px-3 py-2 text-sm font-medium hover:bg-slate-50"
                           >
-                            {copiedId === row.id ? "복사됨" : "초대 코드 복사"}
+                            {copiedId === row.id ? "복사됨" : "주차권 코드 복사"}
                           </button>
                           <button
                             type="button"
