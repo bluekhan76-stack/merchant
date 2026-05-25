@@ -1505,33 +1505,21 @@ export default function MerchantDashboard() {
         onClose={() => setInviteResultModalOpen(false)}
       >
         {issuedInvite ? (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center">
               <p className="text-sm font-semibold text-emerald-800">주차권 코드가 발행되었습니다.</p>
-              <div className="mt-3 rounded-xl bg-white px-4 py-4 text-3xl font-black tracking-widest text-slate-900 ring-1 ring-emerald-100">
-                {issuedInvite.inviteCode || "-"}
-              </div>
-              <p className="mt-3 text-xs leading-relaxed text-emerald-800">
-                방문자에게 주차권 코드를 직접 전달해 주세요. 전화번호/SMS는 사용하지 않습니다.
+              <p className="mt-2 text-xs leading-relaxed text-emerald-800">
+                주차권 링크를 복사하여 사용자에게 문자 또는 메신저로 전달해 주세요.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={copyIssuedInviteCode}
-                className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-semibold text-white hover:opacity-90"
-              >
-                주차권 코드 복사
-              </button>
-              <button
-                type="button"
-                onClick={copyIssuedInviteLink}
-                className="rounded-xl border border-emerald-300 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
-              >
-                주차권 링크 복사
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={copyIssuedInviteLink}
+              className="w-full rounded-xl border border-emerald-300 bg-white px-4 py-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-50"
+            >
+              주차권 링크 복사
+            </button>
 
             <button
               type="button"
