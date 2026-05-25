@@ -400,17 +400,17 @@ export default function AdminDashboard() {
           </div>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[1180px] text-left text-sm">
+            <table className="w-full min-w-[1080px] table-fixed text-left text-sm">
               <thead className="border-b text-slate-500">
                 <tr>
-                  <th className="py-3">아이디</th>
-                  <th>상가명</th>
-                  <th>호실</th>
-                  <th>요금제</th>
-                  <th>사용 횟수</th>
-                  <th>주차권 추가</th>
-                  <th>차단기 MAC 주소</th>
-                  <th className="w-[150px]">활성화</th>
+                  <th className="w-[95px] py-3">아이디</th>
+                  <th className="w-[95px]">상가명</th>
+                  <th className="w-[55px]">호실</th>
+                  <th className="w-[120px]">요금제</th>
+                  <th className="w-[150px]">사용 횟수</th>
+                  <th className="w-[165px]">주차권 추가</th>
+                  <th className="w-[260px]">차단기 MAC 주소</th>
+                  <th className="w-[140px]">관리</th>
                 </tr>
               </thead>
               <tbody>
@@ -479,8 +479,8 @@ export default function AdminDashboard() {
                           </button>
                         </div>
                       </td>
-                      <td className="py-3">
-                        <div className="grid min-w-[250px] grid-cols-1 gap-2">
+                      <td className="py-3 pr-3">
+                        <div className="grid w-[245px] grid-cols-1 gap-2">
                           {getParkingGates(item).map((gate) => (
                             <label key={gate.id} className="flex items-center gap-2">
                               <span className="w-12 shrink-0 text-xs font-semibold text-slate-600">
@@ -500,15 +500,15 @@ export default function AdminDashboard() {
                                     ),
                                   })
                                 }
-                                className="w-36 rounded-xl border px-2 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-slate-300"
+                                className="w-[138px] rounded-xl border px-2 py-2 font-mono text-xs outline-none focus:ring-2 focus:ring-slate-300"
                                 disabled={loading}
                               />
                             </label>
                           ))}
                         </div>
                       </td>
-                      <td className="py-3">
-                        <div className="flex flex-col items-start gap-2 whitespace-nowrap">
+                      <td className="py-3 align-middle">
+                        <div className="flex w-[130px] flex-col items-start gap-2 whitespace-nowrap">
                           <label className="flex items-center gap-2">
                             <input
                               type="checkbox"
@@ -526,7 +526,7 @@ export default function AdminDashboard() {
                           <button
                             type="button"
                             onClick={() => resetPassword(item.merchantId)}
-                            className="rounded-xl border border-slate-300 px-3 py-2 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="w-full rounded-xl border border-slate-300 px-2 py-2 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                             disabled={loading}
                           >
                             비밀번호 초기화
