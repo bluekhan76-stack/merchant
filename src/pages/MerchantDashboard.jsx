@@ -1188,7 +1188,7 @@ export default function MerchantDashboard() {
   }
 
 
-  function handleIssueQrPass() {
+  async function handleIssueQrPass() {
     setError("");
 
     if (!canIssueParkingPass) {
@@ -1230,15 +1230,101 @@ export default function MerchantDashboard() {
       customValidityRange: false,
     };
 
-    const nextPendingQrPass = buildPendingPass({ form: nextForm, merchant, invites });
-    setPendingQrPass({
-      ...nextPendingQrPass,
+    const nextPendingQrPass = {
+      ...buildPendingPass({ form: nextForm, merchant, invites }),
       visitorName: form.visitorName.trim() || "QR 방문자",
       phone: "QR 스캔 발급",
       issueMethod: "qr",
-    });
-    setQrConfirmModalOpen(true);
+    };
+
+    const validFrom = new Date(nextPendingQrPass.ticketValidFrom);
+    const validUntil = new Date(nextPendingQrPass.ticketValidUntil);
+    if (Number.isNaN(validFrom.getTime()) || Number.isNaN(validUntil.getTime())) {
+      setError("주차권 사용 시작일시와 종료일시를 확인해 주세요.");
+      return;
+    }
+
+    if (validUntil.getTime() <= validFrom.getTime()) {
+      setError("주차권 사용 종료일시는 시작일시보다 늦어야 합니다.");
+      return;
+    }
+
+    const selectedGateIds = normalizeGateIds(nextPendingQrPass.parkingGateIds);
+    const selectedGateNames =
+      Array.isArray(nextPendingQrPass.parkingGateNames) && nextPendingQrPass.parkingGateNames.length > 0
+        ? nextPendingQrPass.parkingGateNames
+        : gateNamesFromIds(selectedGateIds, merchant.parkingGates);
+    const selectedParkingGates =
+      Array.isArray(nextPendingQrPass.parkingGates) && nextPendingQrPass.parkingGates.length > 0
+        ? nextPendingQrPass.parkingGates
+        : parkingGatesFromIds(selectedGateIds, merchant.parkingGates);
+
+    setQrBusy(true);
+    setApiStatus("서버에 QR 주차권 등록 요청 중입니다...");
+
+    try {
+      const result = await requestQrParkingPass({
+        visitorName: nextPendingQrPass.visitorName || "QR 방문자",
+        parkingGateIds: selectedGateIds,
+        parkingGateNames: selectedGateNames,
+        parkingGates: selectedParkingGates,
+        validMinutes: Number(nextPendingQrPass.durationMinutes),
+        memo: nextPendingQrPass.memo || "",
+        usageLimit: Number(nextPendingQrPass.usageLimit || 1),
+        ticketValidFrom: validFrom.toISOString(),
+        ticketValidUntil: validUntil.toISOString(),
+        merchant,
+      });
+
+      const inviteId = result.inviteId || result.requestId || result.id || safeUuid();
+      const inviteCode = result.inviteCode || result.code || inviteId;
+      const inviteUrl = deepLinkFor("", inviteId, inviteCode);
+
+      const { history, visitCount, ...newQrPass } = nextPendingQrPass;
+      const newQrInvite = sanitizeInvite({
+        ...newQrPass,
+        id: inviteId,
+        inviteId,
+        inviteCode,
+        visitorName: nextPendingQrPass.visitorName || "QR 방문자",
+        phone: "QR 스캔 발급",
+        shopName: merchant.shopName,
+        parkingGateIds: selectedGateIds,
+        parkingGateNames: selectedGateNames,
+        parkingGates: selectedParkingGates,
+        durationMinutes: Number(nextPendingQrPass.durationMinutes),
+        expiresAt: futureIso(Number(nextPendingQrPass.durationMinutes)),
+        ticketValidFrom: validFrom.toISOString(),
+        ticketValidUntil: validUntil.toISOString(),
+        usageLimit: Number(nextPendingQrPass.usageLimit || 1),
+        status: "발행 완료",
+        issueMethod: "qr",
+        createdAt: nowIso(),
+        serverSynced: true,
+        serverInviteUrl: inviteUrl,
+      });
+
+      updateMerchantUsageFromApi(result, Number(newQrInvite.usageLimit || 1));
+      persistInvites([newQrInvite, ...invites]);
+      setQrTicket({
+        ...newQrInvite,
+        inviteUrl,
+      });
+      setQrTicketUsed(false);
+      setQrModalOpen(true);
+      setQrConfirmModalOpen(false);
+      setPendingQrPass(null);
+      setToast("QR 주차권이 서버에 등록되었습니다.");
+      setApiStatus("");
+      resetForm();
+    } catch (err) {
+      setApiStatus("");
+      setError(err?.message || "QR 주차권 등록 중 오류가 발생했습니다.");
+    } finally {
+      setQrBusy(false);
+    }
   }
+
 
   async function confirmIssueQrPass() {
     if (!pendingQrPass) return;
@@ -1633,11 +1719,6 @@ export default function MerchantDashboard() {
                 <p className="text-xs text-slate-500">
                   방문자 폰으로 스캔하면 서버에 등록된 실제 주차권 코드로 열립니다. 사용 처리 후에는 같은 팝업에서 새 QR을 발행할 수 있습니다.
                 </p>
-                {!qrTicketUsed ? (
-                  <div className="w-full rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-700 break-all">
-                    {qrTicket.inviteUrl}
-                  </div>
-                ) : null}
               </div>
             </div>
 
@@ -1663,21 +1744,6 @@ export default function MerchantDashboard() {
                 className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {qrBusy ? "발행 중..." : canIssueParkingPass ? "새 QR 발행" : "승인 후 발행 가능"}
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(qrTicket.inviteUrl);
-                    setToast("QR 링크를 복사했습니다.");
-                  } catch {
-                    setError("클립보드 복사에 실패했습니다.");
-                  }
-                }}
-                disabled={qrTicketUsed}
-                className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                링크 복사
               </button>
               <button
                 type="button"
