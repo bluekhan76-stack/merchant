@@ -410,7 +410,7 @@ export default function AdminDashboard() {
                   <th>사용 횟수</th>
                   <th>주차권 추가</th>
                   <th>차단기 MAC 주소</th>
-                  <th className="w-[190px]">활성화</th>
+                  <th className="w-[150px]">활성화</th>
                 </tr>
               </thead>
               <tbody>
@@ -508,7 +508,7 @@ export default function AdminDashboard() {
                         </div>
                       </td>
                       <td className="py-3">
-                        <div className="flex items-center gap-3 whitespace-nowrap">
+                        <div className="flex flex-col items-start gap-2 whitespace-nowrap">
                           <label className="flex items-center gap-2">
                             <input
                               type="checkbox"
@@ -526,7 +526,7 @@ export default function AdminDashboard() {
                           <button
                             type="button"
                             onClick={() => resetPassword(item.merchantId)}
-                            className="rounded-xl border border-slate-300 px-3 py-2 text-xs hover:bg-slate-50"
+                            className="rounded-xl border border-slate-300 px-3 py-2 text-xs hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                             disabled={loading}
                           >
                             비밀번호 초기화
