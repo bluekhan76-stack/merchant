@@ -827,21 +827,11 @@ export default function MerchantDashboard() {
     }));
   }, [remainingPasses, isPayAsYouGo]);
 
-  const localTodayIssued = useMemo(() => {
-    const todayKey = getKstDateKey();
-    return invites.filter((item) => {
-      const d = new Date(item.createdAt);
-      if (Number.isNaN(d.getTime())) return false;
-      return getKstDateKey(d) === todayKey;
-    }).length;
-  }, [invites]);
-
   // 운영 표시값은 서버 카운트를 우선 사용합니다.
   // localStorage 발행내역은 로그아웃/기기 변경에 따라 달라질 수 있으므로 보조값으로만 사용합니다.
   const todayIssued = useMemo(() => {
-    const serverCount = getServerTodayIssuedCount(merchant);
-    return Math.max(serverCount, localTodayIssued);
-  }, [merchant.todayIssuedDate, merchant.todayIssuedCount, localTodayIssued]);
+    return getServerTodayIssuedCount(merchant);
+  }, [merchant.todayIssuedDate, merchant.todayIssuedCount]);
 
   const filteredInvites = useMemo(() => {
     if (filter === "all") return invites;
