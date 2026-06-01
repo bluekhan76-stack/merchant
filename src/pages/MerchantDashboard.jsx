@@ -46,15 +46,33 @@ async function getIdToken() {
   return idToken;
 }
 
-function planLabel(planLimit) {
+function isPayAsYouGoPlan(merchant) {
+  return String(merchant?.planType || "").toLowerCase() === "payg" ||
+    String(merchant?.planLimit || "").toLowerCase() === "payg";
+}
+
+function getUnitPrice(merchant) {
+  const unitPrice = Number(merchant?.unitPrice || merchant?.paygUnitPrice || 0);
+  return Number.isFinite(unitPrice) && unitPrice >= 0 ? Math.floor(unitPrice) : 0;
+}
+
+function formatCurrency(value) {
+  const n = Number(value || 0);
+  return `${new Intl.NumberFormat("ko-KR").format(Math.max(n, 0))}원`;
+}
+
+function planLabel(planLimit, planType) {
+  if (String(planType || "").toLowerCase() === "payg" || String(planLimit || "").toLowerCase() === "payg") return "종량제";
   if (planLimit === -1 || planLimit === "unlimited") return "무제한";
   if (planLimit === undefined || planLimit === null || planLimit === "") return "-";
   return `월 ${planLimit}건`;
 }
 
 function mapMerchantFromApi(item) {
-  const planLimit = item?.planLimit === "unlimited" ? -1 : Number(item?.monthlyQuota ?? item?.planLimit ?? defaultMerchant.monthlyQuota);
-  const additionalPasses = Number(item?.additionalPasses || 0);
+  const planType = String(item?.planType || "").toLowerCase() === "payg" || String(item?.planLimit || "").toLowerCase() === "payg" ? "payg" : "subscription";
+  const planLimit = planType === "payg" ? 0 : item?.planLimit === "unlimited" ? -1 : Number(item?.monthlyQuota ?? item?.planLimit ?? defaultMerchant.monthlyQuota);
+  const additionalPasses = planType === "payg" ? 0 : Number(item?.additionalPasses || 0);
+  const unitPrice = getUnitPrice(item);
   const buildingName = item?.buildingName || item?.shopName || defaultMerchant.shopName;
   const roomNo = item?.roomNo || "";
   const shopName = buildingName;
@@ -69,11 +87,15 @@ function mapMerchantFromApi(item) {
     shopName,
     ownerName: item?.ownerName || item?.email || defaultMerchant.ownerName,
     address: item?.address || buildingName,
+    planType,
+    unitPrice,
     planLimit,
-    planName: planLabel(planLimit),
+    planName: planLabel(planLimit, planType),
     monthlyQuota: planLimit,
     additionalPasses,
-    totalLimit: planLimit === -1 ? -1 : planLimit + additionalPasses,
+    totalLimit: planLimit === -1 || planType === "payg" ? -1 : planLimit + additionalPasses,
+    estimatedAmount: planType === "payg" ? Number(item?.estimatedAmount ?? Number(item?.usedCount || 0) * unitPrice) : 0,
+    usageHistory: Array.isArray(item?.usageHistory) ? item.usageHistory : [],
     usedCount: Number(item?.usedCount || 0),
     isActive: item?.isActive !== false,
     status: item?.status || "pending",
@@ -715,7 +737,9 @@ export default function MerchantDashboard() {
     });
   }, [merchant]);
 
-  const isUnlimitedPlan = merchant.monthlyQuota === -1;
+  const isPayAsYouGo = isPayAsYouGoPlan(merchant);
+  const isUnlimitedPlan = !isPayAsYouGo && merchant.monthlyQuota === -1;
+  const unitPrice = getUnitPrice(merchant);
 
   const billingCycle = useMemo(() => getBillingCycle(merchant), [merchant]);
   const billingPeriodText = useMemo(() => displayBillingPeriod(billingCycle), [billingCycle]);
@@ -723,6 +747,7 @@ export default function MerchantDashboard() {
   const accountText = useMemo(() => merchantAccountText(merchant), [merchant]);
 
   const remainingPasses = useMemo(() => {
+    if (isPayAsYouGo) return 999999;
     if (isUnlimitedPlan) return 999999;
 
     const cycleStartTime = billingCycle.start?.getTime?.() || 0;
@@ -747,6 +772,7 @@ export default function MerchantDashboard() {
     merchant.monthlyQuota,
     merchant.additionalPasses,
     merchant.usedCount,
+    isPayAsYouGo,
     isUnlimitedPlan,
     billingCycle,
   ]);
@@ -760,11 +786,12 @@ export default function MerchantDashboard() {
   const canIssueParkingPass = isMerchantApproved && merchant.isActive !== false;
 
   useEffect(() => {
+    if (isPayAsYouGo) return;
     setForm((prev) => ({
       ...prev,
       usageLimit: String(Math.min(Math.max(Number(prev.usageLimit || 1), 1), Math.max(remainingPasses, 1))),
     }));
-  }, [remainingPasses]);
+  }, [remainingPasses, isPayAsYouGo]);
 
   const todayIssued = useMemo(() => {
     const today = new Date().toLocaleDateString("ko-KR");
@@ -810,17 +837,22 @@ export default function MerchantDashboard() {
         result?.merchantAdditionalPasses ?? prev.additionalPasses ?? 0
       );
 
-      const nextMonthlyQuota = Number(
+      const nextPlanType = String(result?.merchantPlanType || prev.planType || "subscription").toLowerCase() === "payg" ? "payg" : "subscription";
+      const nextUnitPrice = Number(result?.merchantUnitPrice ?? prev.unitPrice ?? 0);
+      const nextMonthlyQuota = nextPlanType === "payg" ? 0 : Number(
         result?.merchantMonthlyQuota ?? result?.merchantPlanLimit ?? prev.monthlyQuota ?? prev.planLimit ?? 0
       );
 
       const nextMerchant = {
         ...prev,
         usedCount: nextUsedCount,
-        additionalPasses: nextAdditionalPasses,
+        planType: nextPlanType,
+        unitPrice: Number.isFinite(nextUnitPrice) ? nextUnitPrice : 0,
+        estimatedAmount: nextPlanType === "payg" ? nextUsedCount * (Number.isFinite(nextUnitPrice) ? nextUnitPrice : 0) : 0,
+        additionalPasses: nextPlanType === "payg" ? 0 : nextAdditionalPasses,
         monthlyQuota: nextMonthlyQuota,
         planLimit: nextMonthlyQuota,
-        totalLimit: nextMonthlyQuota === -1 ? -1 : nextMonthlyQuota + nextAdditionalPasses,
+        totalLimit: nextMonthlyQuota === -1 || nextPlanType === "payg" ? -1 : nextMonthlyQuota + nextAdditionalPasses,
       };
 
       localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(nextMerchant));
@@ -848,7 +880,7 @@ export default function MerchantDashboard() {
         const numeric = Number(String(value).replace(/\D/g, "") || 1);
         return {
           ...prev,
-          usageLimit: String(Math.min(Math.max(numeric, 1), Math.max(remainingPasses, 1))),
+          usageLimit: String(isPayAsYouGo ? Math.max(numeric, 1) : Math.min(Math.max(numeric, 1), Math.max(remainingPasses, 1))),
         };
       }
 
@@ -929,7 +961,7 @@ export default function MerchantDashboard() {
     setForm((prev) => ({
       ...prev,
       durationMinutes: String(favorite.durationMinutes || "60"),
-      usageLimit: String(Math.min(Math.max(Number(favorite.usageLimit || 1), 1), Math.max(remainingPasses, 1))),
+      usageLimit: String(isPayAsYouGo ? Math.max(Number(favorite.usageLimit || 1), 1) : Math.min(Math.max(Number(favorite.usageLimit || 1), 1), Math.max(remainingPasses, 1))),
       ticketValidFrom: favorite.ticketValidFrom || prev.ticketValidFrom,
       ticketValidUntil: favorite.ticketValidUntil || prev.ticketValidUntil,
       customValidityRange: favorite.customValidityRange ?? true,
@@ -973,14 +1005,14 @@ export default function MerchantDashboard() {
       return;
     }
 
-    if (remainingPasses <= 0) {
+    if (!isPayAsYouGo && remainingPasses <= 0) {
       setError("잔여 주차권이 없습니다. 운영자에게 충전 요청이 필요합니다.");
       return;
     }
 
     const usageLimit = Number(form.usageLimit || 1);
-    if (usageLimit < 1 || usageLimit > remainingPasses) {
-      setError(`사용 가능 횟수는 1회 이상, 잔여 주차권 ${remainingPasses}회 이하로 설정해 주세요.`);
+    if (usageLimit < 1 || (!isPayAsYouGo && usageLimit > remainingPasses)) {
+      setError(isPayAsYouGo ? "사용 가능 횟수는 1회 이상으로 설정해 주세요." : `사용 가능 횟수는 1회 이상, 잔여 주차권 ${remainingPasses}회 이하로 설정해 주세요.`);
       return;
     }
 
@@ -1215,7 +1247,7 @@ export default function MerchantDashboard() {
       return;
     }
 
-    if (remainingPasses <= 0) {
+    if (!isPayAsYouGo && remainingPasses <= 0) {
       setQrTicket(null);
       setPendingQrPass(null);
       setQrTicketUsed(false);
@@ -1225,8 +1257,12 @@ export default function MerchantDashboard() {
     }
 
     const usageLimit = Number(form.usageLimit || 1);
-    if (usageLimit < 1 || usageLimit > remainingPasses) {
-      setQrModalNotice(`사용 가능 횟수는 1회 이상, 잔여 주차권 ${remainingPasses}회 이하로 설정해 주세요.`);
+    if (usageLimit < 1 || (!isPayAsYouGo && usageLimit > remainingPasses)) {
+      setQrModalNotice(
+        isPayAsYouGo
+          ? "사용 가능 횟수는 1회 이상으로 설정해 주세요."
+          : `사용 가능 횟수는 1회 이상, 잔여 주차권 ${remainingPasses}회 이하로 설정해 주세요.`
+      );
       setQrModalOpen(true);
       return;
     }
@@ -1401,12 +1437,33 @@ export default function MerchantDashboard() {
   const monthlyQuotaValue = Number(merchant.monthlyQuota || 0);
   const additionalPassesValue = Number(merchant.additionalPasses || 0);
   const totalLimitValue = isUnlimitedPlan ? -1 : monthlyQuotaValue + additionalPassesValue;
+  const monthlyUsedCount = Number(merchant.usedCount || 0);
+  const estimatedMonthlyAmount = isPayAsYouGo ? monthlyUsedCount * unitPrice : 0;
+  const currentUsageHistory = useMemo(() => ({
+    cycleStartAt: billingCycle.start?.toISOString?.() || "",
+    cycleEndAt: billingCycle.end?.toISOString?.() || "",
+    usedCount: monthlyUsedCount,
+    planType: isPayAsYouGo ? "payg" : "subscription",
+    unitPrice,
+    amount: isPayAsYouGo ? estimatedMonthlyAmount : 0,
+    isCurrent: true,
+  }), [billingCycle, monthlyUsedCount, isPayAsYouGo, unitPrice, estimatedMonthlyAmount]);
+  const usageHistoryRows = useMemo(() => [
+    currentUsageHistory,
+    ...(Array.isArray(merchant.usageHistory) ? merchant.usageHistory.slice().reverse() : []),
+  ].slice(0, 6), [currentUsageHistory, merchant.usageHistory]);
 
-  const stats = [
-    { label: "잔여 주차권", value: isUnlimitedPlan ? "무제한" : `${remainingPasses}` },
-    { label: "오늘 발행", value: `${todayIssued}` },
-    { label: "이번 달 한도", value: isUnlimitedPlan ? "무제한" : `${totalLimitValue}` },
-  ];
+  const stats = isPayAsYouGo
+    ? [
+        { label: "이번 달 사용", value: `${monthlyUsedCount}건` },
+        { label: "오늘 발행", value: `${todayIssued}건` },
+        { label: "이번 달 예상요금", value: formatCurrency(estimatedMonthlyAmount) },
+      ]
+    : [
+        { label: "잔여 주차권", value: isUnlimitedPlan ? "무제한" : `${remainingPasses}` },
+        { label: "오늘 발행", value: `${todayIssued}` },
+        { label: "이번 달 한도", value: isUnlimitedPlan ? "무제한" : `${totalLimitValue}` },
+      ];
 
 
   return (
@@ -1833,7 +1890,7 @@ export default function MerchantDashboard() {
                   D-{rechargeDday}
                 </span>
                 <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                  잔여 주차권 {isUnlimitedPlan ? "무제한" : `${remainingPasses}건`}
+                  {isPayAsYouGo ? `종량제 · ${formatCurrency(unitPrice)}/건` : `잔여 주차권 ${isUnlimitedPlan ? "무제한" : String(remainingPasses) + "건"}`}
                 </span>
               </div>
             </div>
@@ -1972,17 +2029,57 @@ export default function MerchantDashboard() {
             ))}
           </div>
 
-          <div className="mt-2 rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-950 ring-1 ring-indigo-100">
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-semibold">추가 주차권</span>
-              <span className="text-lg font-black">
-                {isUnlimitedPlan ? "무제한" : `${additionalPassesValue}`}
-              </span>
+          {isPayAsYouGo ? (
+            <div className="mt-2 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-950 ring-1 ring-emerald-100">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-semibold">종량제 단가</span>
+                <span className="text-lg font-black">{formatCurrency(unitPrice)} / 건</span>
+              </div>
+              <p className="mt-1 text-xs text-emerald-700">
+                월 한도 없이 발행한 사용량 기준으로 예상요금이 계산됩니다. 현재 청구기간: {billingPeriodText}
+              </p>
             </div>
-            <p className="mt-1 text-xs text-indigo-700">
-              기본 월 한도를 먼저 사용하고, 초과분부터 추가 주차권이 사용됩니다. 남은 추가 주차권은 다음 달로 이월됩니다.
-            </p>
-          </div>
+          ) : (
+            <div className="mt-2 rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-950 ring-1 ring-indigo-100">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-semibold">추가 주차권</span>
+                <span className="text-lg font-black">
+                  {isUnlimitedPlan ? "무제한" : `${additionalPassesValue}`}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-indigo-700">
+                기본 월 한도를 먼저 사용하고, 초과분부터 추가 주차권이 사용됩니다. 남은 추가 주차권은 다음 달로 이월됩니다.
+              </p>
+            </div>
+          )}
+
+          {isPayAsYouGo ? (
+            <div className="mt-2 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
+              <h2 className="text-base font-semibold">월별 사용량 히스토리</h2>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[520px] text-left text-xs">
+                  <thead className="text-slate-500">
+                    <tr className="border-b">
+                      <th className="py-2">기간</th>
+                      <th className="py-2 text-right">사용량</th>
+                      <th className="py-2 text-right">단가</th>
+                      <th className="py-2 text-right">요금</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usageHistoryRows.map((row, index) => (
+                      <tr key={`${row.cycleStartAt || index}-${index}`} className="border-b last:border-0">
+                        <td className="py-2">{displayDateOnly(row.cycleStartAt)} ~ {displayDateOnly(row.cycleEndAt)} {row.isCurrent ? "(이번 달)" : ""}</td>
+                        <td className="py-2 text-right font-semibold">{Number(row.usedCount || 0)}건</td>
+                        <td className="py-2 text-right">{formatCurrency(row.unitPrice || 0)}</td>
+                        <td className="py-2 text-right font-bold">{formatCurrency(row.amount || 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           {showHistoryPanel ? (
             <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
@@ -2107,7 +2204,7 @@ export default function MerchantDashboard() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">요금제</span>
-                <span className="font-medium">{planLabel(merchant.planLimit ?? merchant.monthlyQuota)}</span>
+                <span className="font-medium">{planLabel(merchant.planLimit ?? merchant.monthlyQuota, merchant.planType)}</span>
               </div>
             </div>
           </div>

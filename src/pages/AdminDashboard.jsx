@@ -5,7 +5,7 @@ import { clearSession } from "../auth/auth.js";
 import { fetchAuthSession } from "aws-amplify/auth";
 
 const API_BASE = "https://8q72reoak2.execute-api.ap-northeast-2.amazonaws.com";
-const PLAN_OPTIONS = [100, 200, 300, 400, 500, "unlimited"];
+const PLAN_OPTIONS = [100, 200, 300, 400, 500, "unlimited", "payg"];
 
 function formatDate(value) {
   if (!value) return "-";
@@ -33,7 +33,23 @@ async function getIdToken() {
   return idToken;
 }
 
-function planLabel(value) {
+function isPayAsYouGoPlan(item) {
+  return String(item?.planType || "").toLowerCase() === "payg" ||
+    String(item?.planLimit || "").toLowerCase() === "payg";
+}
+
+function getUnitPrice(item) {
+  const unitPrice = Number(item?.unitPrice || item?.paygUnitPrice || 0);
+  return Number.isFinite(unitPrice) && unitPrice >= 0 ? Math.floor(unitPrice) : 0;
+}
+
+function formatCurrency(value) {
+  const n = Number(value || 0);
+  return `${new Intl.NumberFormat("ko-KR").format(Math.max(n, 0))}원`;
+}
+
+function planLabel(value, planType) {
+  if (String(planType || "").toLowerCase() === "payg" || String(value || "").toLowerCase() === "payg") return "종량제";
   if (value === -1 || value === "unlimited") return "무제한";
   return String(value ?? "-");
 }
@@ -350,9 +366,25 @@ export default function AdminDashboard() {
   }
 
   function getMonthlyTotalLimit(item) {
+    if (isPayAsYouGoPlan(item)) return -1;
     if (item?.planLimit === -1 || item?.planLimit === "unlimited") return -1;
     const monthlyQuota = Number(item?.monthlyQuota ?? item?.planLimit ?? 0);
     return monthlyQuota + getAdditionalPasses(item);
+  }
+
+  function getUsageHistoryRows(item) {
+    const history = Array.isArray(item?.usageHistory) ? item.usageHistory.slice().reverse() : [];
+    const currentUnitPrice = getUnitPrice(item);
+    const current = {
+      cycleStartAt: item?.usageCycleStartedAt || item?.approvedAt || item?.createdAt || "",
+      cycleEndAt: item?.usageCycleEndAt || getSubscriptionEndValue(item),
+      usedCount: Number(item?.usedCount || 0),
+      planType: isPayAsYouGoPlan(item) ? "payg" : "subscription",
+      unitPrice: currentUnitPrice,
+      amount: isPayAsYouGoPlan(item) ? Number(item?.usedCount || 0) * currentUnitPrice : 0,
+      isCurrent: true,
+    };
+    return [current, ...history].slice(0, 4);
   }
 
   async function addParkingTickets(item) {
@@ -382,6 +414,33 @@ export default function AdminDashboard() {
     await updateMerchant(item.merchantId, { additionalPasses: nextAdditionalPasses });
     setTicketAddInputs((prev) => ({ ...prev, [item.merchantId]: "" }));
     alert("이번 달 사용 주차권에 추가되었습니다.");
+  }
+
+  async function changePlan(item, value) {
+    if (!item?.merchantId) return;
+    if (value === "payg") {
+      const currentUnitPrice = getUnitPrice(item);
+      await updateMerchant(item.merchantId, {
+        planLimit: "payg",
+        unitPrice: currentUnitPrice,
+        additionalPasses: 0,
+      });
+      return;
+    }
+    await updateMerchant(item.merchantId, {
+      planType: "subscription",
+      planLimit: value,
+    });
+  }
+
+  async function updateUnitPrice(item, value) {
+    if (!item?.merchantId) return;
+    const unitPrice = Number(value);
+    if (!Number.isInteger(unitPrice) || unitPrice < 0) {
+      alert("개당 요금은 0 이상의 정수로 입력해 주세요.");
+      return;
+    }
+    await updateMerchant(item.merchantId, { planType: "payg", unitPrice });
   }
 
   async function resetPassword(merchantId) {
@@ -616,28 +675,53 @@ export default function AdminDashboard() {
                         <div>
                           <div className="text-xs font-semibold text-slate-500">요금제</div>
                           <select
-                            value={item.planLimit === -1 ? "unlimited" : item.planLimit}
-                            onChange={(e) => updateMerchant(item.merchantId, { planLimit: e.target.value })}
+                            value={isPayAsYouGoPlan(item) ? "payg" : item.planLimit === -1 ? "unlimited" : item.planLimit}
+                            onChange={(e) => changePlan(item, e.target.value)}
                             className="mt-1 w-full max-w-[130px] rounded-xl border px-3 py-2"
                             disabled={loading}
                           >
                             {PLAN_OPTIONS.map((option) => (
                               <option key={option} value={option}>
-                                {option === "unlimited" ? "무제한" : option}
+                                {option === "unlimited" ? "무제한" : option === "payg" ? "종량제" : option}
                               </option>
                             ))}
                           </select>
+                          {isPayAsYouGoPlan(item) && (
+                            <div className="mt-2 flex items-center gap-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                defaultValue={getUnitPrice(item)}
+                                onBlur={(e) => updateUnitPrice(item, e.target.value)}
+                                className="w-24 rounded-xl border px-2 py-1 text-sm"
+                                disabled={loading}
+                              />
+                              <span className="text-xs text-slate-500">원/건</span>
+                            </div>
+                          )}
                         </div>
                         <div>
                           <div className="text-xs font-semibold text-slate-500">사용 횟수</div>
                           <div className="mt-1 whitespace-nowrap">
-                            <div>
-                              {item.usedCount || 0} / {totalLimit === -1 ? "무제한" : `${totalLimit}건`}
-                            </div>
-                            {totalLimit !== -1 && additionalPasses > 0 && (
-                              <div className="text-xs text-slate-500">
-                                기본 {item.monthlyQuota ?? item.planLimit ?? 0}건 + 추가 {additionalPasses}건
-                              </div>
+                            {isPayAsYouGoPlan(item) ? (
+                              <>
+                                <div>{item.usedCount || 0}건</div>
+                                <div className="text-xs text-emerald-700">
+                                  예상 {formatCurrency(Number(item.usedCount || 0) * getUnitPrice(item))}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div>
+                                  {item.usedCount || 0} / {totalLimit === -1 ? "무제한" : `${totalLimit}건`}
+                                </div>
+                                {totalLimit !== -1 && additionalPasses > 0 && (
+                                  <div className="text-xs text-slate-500">
+                                    기본 {item.monthlyQuota ?? item.planLimit ?? 0}건 + 추가 {additionalPasses}건
+                                  </div>
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
@@ -653,6 +737,20 @@ export default function AdminDashboard() {
                           </div>
                         </div>
                       </div>
+
+                      {isPayAsYouGoPlan(item) && (
+                        <div className="rounded-2xl bg-emerald-50 p-3 ring-1 ring-emerald-100">
+                          <div className="mb-2 text-xs font-semibold text-emerald-700">종량제 사용량 히스토리</div>
+                          <div className="space-y-1 text-xs">
+                            {getUsageHistoryRows(item).map((row, index) => (
+                              <div key={`${row.cycleStartAt || index}-${index}`} className="flex items-center justify-between gap-2 rounded-xl bg-white/70 px-2 py-1">
+                                <span>{formatDate(row.cycleStartAt)} ~ {formatDate(row.cycleEndAt)} {row.isCurrent ? "(이번 달)" : ""}</span>
+                                <span className="font-semibold">{Number(row.usedCount || 0)}건 / {formatCurrency(row.amount || 0)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       <div className="rounded-2xl bg-slate-50 p-3">
                         <div className="mb-2 text-xs font-semibold text-slate-500">차단기 MAC 주소</div>
@@ -701,13 +799,13 @@ export default function AdminDashboard() {
                               }
                               placeholder="수량"
                               className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                              disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
+                              disabled={loading || isPayAsYouGoPlan(item) || item.planLimit === -1 || item.planLimit === "unlimited"}
                             />
                             <button
                               type="button"
                               onClick={() => addParkingTickets(item)}
                               className="shrink-0 rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                              disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
+                              disabled={loading || isPayAsYouGoPlan(item) || item.planLimit === -1 || item.planLimit === "unlimited"}
                             >
                               추가
                             </button>
