@@ -17,20 +17,30 @@ const API_PATHS = {
   merchantMe: "/merchant/me",
 };
 
+function clearAuthStorageOnly() {
+  [
+    "idToken",
+    "accessToken",
+    "refreshToken",
+    "parking_id_token",
+    "parking_access_token",
+    "role",
+    "isAuthenticated",
+    "session",
+  ].forEach((key) => localStorage.removeItem(key));
+
+  sessionStorage.clear();
+}
+
 async function handleLogout() {
   try {
     await signOut();
-
-    localStorage.clear();
-    sessionStorage.clear();
-
-    window.location.href = "/login";
   } catch (err) {
     console.error(err);
-
-    localStorage.clear();
-    sessionStorage.clear();
-
+  } finally {
+    // 발행 이력/즐겨찾기/상가 캐시는 유지하고 인증 관련 값만 정리합니다.
+    // todayIssuedCount는 서버 기준으로 다시 조회되므로 로그아웃 후 재로그인해도 유지됩니다.
+    clearAuthStorageOnly();
     window.location.href = "/login";
   }
 }
@@ -59,6 +69,27 @@ function getUnitPrice(merchant) {
 function formatCurrency(value) {
   const n = Number(value || 0);
   return `${new Intl.NumberFormat("ko-KR").format(Math.max(n, 0))}원`;
+}
+
+function getKstDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function getServerTodayIssuedCount(merchant) {
+  const serverDate = String(merchant?.todayIssuedDate || "");
+  const todayKey = getKstDateKey();
+
+  if (serverDate && serverDate !== todayKey) {
+    return 0;
+  }
+
+  const count = Number(merchant?.todayIssuedCount || 0);
+  return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0;
 }
 
 function planLabel(planLimit, planType) {
@@ -97,6 +128,8 @@ function mapMerchantFromApi(item) {
     estimatedAmount: planType === "payg" ? Number(item?.estimatedAmount ?? Number(item?.usedCount || 0) * unitPrice) : 0,
     usageHistory: Array.isArray(item?.usageHistory) ? item.usageHistory : [],
     usedCount: Number(item?.usedCount || 0),
+    todayIssuedDate: item?.todayIssuedDate || "",
+    todayIssuedCount: getServerTodayIssuedCount(item),
     isActive: item?.isActive !== false,
     status: item?.status || "pending",
     parkingGates: normalizeParkingGates(item?.parkingGates || item?.gates || item?.parkingGateMacAddresses || item?.gateMacAddresses),
@@ -793,14 +826,21 @@ export default function MerchantDashboard() {
     }));
   }, [remainingPasses, isPayAsYouGo]);
 
-  const todayIssued = useMemo(() => {
-    const today = new Date().toLocaleDateString("ko-KR");
+  const localTodayIssued = useMemo(() => {
+    const todayKey = getKstDateKey();
     return invites.filter((item) => {
       const d = new Date(item.createdAt);
       if (Number.isNaN(d.getTime())) return false;
-      return d.toLocaleDateString("ko-KR") === today;
+      return getKstDateKey(d) === todayKey;
     }).length;
   }, [invites]);
+
+  // 운영 표시값은 서버 카운트를 우선 사용합니다.
+  // localStorage 발행내역은 로그아웃/기기 변경에 따라 달라질 수 있으므로 보조값으로만 사용합니다.
+  const todayIssued = useMemo(() => {
+    const serverCount = getServerTodayIssuedCount(merchant);
+    return Math.max(serverCount, localTodayIssued);
+  }, [merchant.todayIssuedDate, merchant.todayIssuedCount, localTodayIssued]);
 
   const filteredInvites = useMemo(() => {
     if (filter === "all") return invites;
@@ -843,6 +883,11 @@ export default function MerchantDashboard() {
         result?.merchantMonthlyQuota ?? result?.merchantPlanLimit ?? prev.monthlyQuota ?? prev.planLimit ?? 0
       );
 
+      const apiTodayIssuedCount = Number(result?.merchantTodayIssuedCount);
+      const nextTodayIssuedCount = Number.isFinite(apiTodayIssuedCount)
+        ? apiTodayIssuedCount
+        : getServerTodayIssuedCount(prev) + Number(fallbackIncrement || 1);
+
       const nextMerchant = {
         ...prev,
         usedCount: nextUsedCount,
@@ -853,6 +898,8 @@ export default function MerchantDashboard() {
         monthlyQuota: nextMonthlyQuota,
         planLimit: nextMonthlyQuota,
         totalLimit: nextMonthlyQuota === -1 || nextPlanType === "payg" ? -1 : nextMonthlyQuota + nextAdditionalPasses,
+        todayIssuedDate: result?.merchantTodayIssuedDate || getKstDateKey(),
+        todayIssuedCount: nextTodayIssuedCount,
       };
 
       localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(nextMerchant));

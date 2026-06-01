@@ -48,6 +48,27 @@ function formatCurrency(value) {
   return `${new Intl.NumberFormat("ko-KR").format(Math.max(n, 0))}원`;
 }
 
+function getKstDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+function getTodayIssuedCount(item) {
+  const serverDate = String(item?.todayIssuedDate || "");
+  const todayKey = getKstDateKey();
+
+  if (serverDate && serverDate !== todayKey) {
+    return 0;
+  }
+
+  const count = Number(item?.todayIssuedCount || 0);
+  return Number.isFinite(count) && count >= 0 ? Math.floor(count) : 0;
+}
+
 function planLabel(value, planType) {
   if (String(planType || "").toLowerCase() === "payg" || String(value || "").toLowerCase() === "payg") return "종량제";
   if (value === -1 || value === "unlimited") return "무제한";
@@ -421,6 +442,7 @@ export default function AdminDashboard() {
     if (value === "payg") {
       const currentUnitPrice = getUnitPrice(item);
       await updateMerchant(item.merchantId, {
+        planType: "payg",
         planLimit: "payg",
         unitPrice: currentUnitPrice,
         additionalPasses: 0,
@@ -430,6 +452,7 @@ export default function AdminDashboard() {
     await updateMerchant(item.merchantId, {
       planType: "subscription",
       planLimit: value,
+      unitPrice: 0,
     });
   }
 
@@ -706,7 +729,10 @@ export default function AdminDashboard() {
                           <div className="mt-1 whitespace-nowrap">
                             {isPayAsYouGoPlan(item) ? (
                               <>
-                                <div>{item.usedCount || 0}건</div>
+                                <div>이번달 {item.usedCount || 0}건</div>
+                                <div className="text-xs text-slate-500">
+                                  오늘 {getTodayIssuedCount(item)}건
+                                </div>
                                 <div className="text-xs text-emerald-700">
                                   예상 {formatCurrency(Number(item.usedCount || 0) * getUnitPrice(item))}
                                 </div>
@@ -715,6 +741,9 @@ export default function AdminDashboard() {
                               <>
                                 <div>
                                   {item.usedCount || 0} / {totalLimit === -1 ? "무제한" : `${totalLimit}건`}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                  오늘 {getTodayIssuedCount(item)}건
                                 </div>
                                 {totalLimit !== -1 && additionalPasses > 0 && (
                                   <div className="text-xs text-slate-500">
