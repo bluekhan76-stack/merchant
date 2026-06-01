@@ -677,6 +677,7 @@ export default function MerchantDashboard() {
   const [pendingQrPass, setPendingQrPass] = useState(null);
   const [qrConfirmModalOpen, setQrConfirmModalOpen] = useState(false);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+  const [showUsageHistoryPanel, setShowUsageHistoryPanel] = useState(false);
   const [barrierSectionOpen, setBarrierSectionOpen] = useState(false);
   const [apiStatus, setApiStatus] = useState("");
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -1477,6 +1478,7 @@ export default function MerchantDashboard() {
 
     resetForm();
     setShowHistoryPanel(false);
+    setShowUsageHistoryPanel(false);
 
     setToast("로컬 발행 내역을 초기화했습니다.");
   }
@@ -1495,10 +1497,18 @@ export default function MerchantDashboard() {
     amount: isPayAsYouGo ? estimatedMonthlyAmount : 0,
     isCurrent: true,
   }), [billingCycle, monthlyUsedCount, isPayAsYouGo, unitPrice, estimatedMonthlyAmount]);
-  const usageHistoryRows = useMemo(() => [
-    currentUsageHistory,
-    ...(Array.isArray(merchant.usageHistory) ? merchant.usageHistory.slice().reverse() : []),
-  ].slice(0, 6), [currentUsageHistory, merchant.usageHistory]);
+  const usageHistoryRows = useMemo(() => {
+    const history = Array.isArray(merchant.usageHistory) ? merchant.usageHistory : [];
+    const sortedHistory = history
+      .slice()
+      .sort((a, b) => {
+        const aTime = new Date(a?.cycleStartAt || a?.closedAt || 0).getTime();
+        const bTime = new Date(b?.cycleStartAt || b?.closedAt || 0).getTime();
+        return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+      });
+
+    return [currentUsageHistory, ...sortedHistory].slice(0, 6);
+  }, [currentUsageHistory, merchant.usageHistory]);
 
   const stats = isPayAsYouGo
     ? [
@@ -2102,29 +2112,49 @@ export default function MerchantDashboard() {
 
           {isPayAsYouGo ? (
             <div className="mt-2 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
-              <h2 className="text-base font-semibold">월별 사용량 히스토리</h2>
-              <div className="mt-3 overflow-x-auto">
-                <table className="w-full min-w-[520px] text-left text-xs">
-                  <thead className="text-slate-500">
-                    <tr className="border-b">
-                      <th className="py-2">기간</th>
-                      <th className="py-2 text-right">사용량</th>
-                      <th className="py-2 text-right">단가</th>
-                      <th className="py-2 text-right">요금</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {usageHistoryRows.map((row, index) => (
-                      <tr key={`${row.cycleStartAt || index}-${index}`} className="border-b last:border-0">
-                        <td className="py-2">{displayDateOnly(row.cycleStartAt)} ~ {displayDateOnly(row.cycleEndAt)} {row.isCurrent ? "(이번 달)" : ""}</td>
-                        <td className="py-2 text-right font-semibold">{Number(row.usedCount || 0)}건</td>
-                        <td className="py-2 text-right">{formatCurrency(row.unitPrice || 0)}</td>
-                        <td className="py-2 text-right font-bold">{formatCurrency(row.amount || 0)}</td>
+              <button
+                type="button"
+                onClick={() => setShowUsageHistoryPanel((prev) => !prev)}
+                className="flex w-full items-center justify-between gap-3 text-left"
+              >
+                <div>
+                  <h2 className="text-base font-semibold">월별 사용량 히스토리</h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    최신 사용기간이 상단에 표시됩니다.
+                  </p>
+                </div>
+                <span className="rounded-full border px-3 py-1 text-xs font-semibold text-slate-700">
+                  {showUsageHistoryPanel ? "접기" : "펼침"}
+                </span>
+              </button>
+
+              {showUsageHistoryPanel && (
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-left text-xs">
+                    <thead className="text-slate-500">
+                      <tr className="border-b">
+                        <th className="py-2">기간</th>
+                        <th className="py-2 text-right">사용량</th>
+                        <th className="py-2 text-right">단가</th>
+                        <th className="py-2 text-right">요금</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {usageHistoryRows.map((row, index) => (
+                        <tr key={`${row.cycleStartAt || index}-${index}`} className="border-b last:border-0">
+                          <td className="py-2">
+                            {displayDateOnly(row.cycleStartAt)} ~ {displayDateOnly(row.cycleEndAt)}{" "}
+                            {row.isCurrent ? "(이번 달)" : ""}
+                          </td>
+                          <td className="py-2 text-right font-semibold">{Number(row.usedCount || 0)}건</td>
+                          <td className="py-2 text-right">{formatCurrency(row.unitPrice || 0)}</td>
+                          <td className="py-2 text-right font-bold">{formatCurrency(row.amount || 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           ) : null}
 

@@ -241,6 +241,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [ticketAddInputs, setTicketAddInputs] = useState({});
+  const [expandedUsageHistoryId, setExpandedUsageHistoryId] = useState("");
 
   const filteredMerchants = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -394,7 +395,6 @@ export default function AdminDashboard() {
   }
 
   function getUsageHistoryRows(item) {
-    const history = Array.isArray(item?.usageHistory) ? item.usageHistory.slice().reverse() : [];
     const currentUnitPrice = getUnitPrice(item);
     const current = {
       cycleStartAt: item?.usageCycleStartedAt || item?.approvedAt || item?.createdAt || "",
@@ -405,7 +405,17 @@ export default function AdminDashboard() {
       amount: isPayAsYouGoPlan(item) ? Number(item?.usedCount || 0) * currentUnitPrice : 0,
       isCurrent: true,
     };
-    return [current, ...history].slice(0, 4);
+
+    const history = Array.isArray(item?.usageHistory) ? item.usageHistory : [];
+    const sortedHistory = history
+      .slice()
+      .sort((a, b) => {
+        const aTime = new Date(a?.cycleStartAt || a?.closedAt || 0).getTime();
+        const bTime = new Date(b?.cycleStartAt || b?.closedAt || 0).getTime();
+        return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+      });
+
+    return [current, ...sortedHistory].slice(0, 6);
   }
 
   async function addParkingTickets(item) {
@@ -769,15 +779,41 @@ export default function AdminDashboard() {
 
                       {isPayAsYouGoPlan(item) && (
                         <div className="rounded-2xl bg-emerald-50 p-3 ring-1 ring-emerald-100">
-                          <div className="mb-2 text-xs font-semibold text-emerald-700">종량제 사용량 히스토리</div>
-                          <div className="space-y-1 text-xs">
-                            {getUsageHistoryRows(item).map((row, index) => (
-                              <div key={`${row.cycleStartAt || index}-${index}`} className="flex items-center justify-between gap-2 rounded-xl bg-white/70 px-2 py-1">
-                                <span>{formatDate(row.cycleStartAt)} ~ {formatDate(row.cycleEndAt)} {row.isCurrent ? "(이번 달)" : ""}</span>
-                                <span className="font-semibold">{Number(row.usedCount || 0)}건 / {formatCurrency(row.amount || 0)}</span>
-                              </div>
-                            ))}
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedUsageHistoryId((prev) =>
+                                prev === item.merchantId ? "" : item.merchantId
+                              )
+                            }
+                            className="flex w-full items-center justify-between gap-3 text-left"
+                          >
+                            <span className="text-xs font-semibold text-emerald-700">
+                              종량제 사용량 히스토리
+                            </span>
+                            <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-100">
+                              {expandedUsageHistoryId === item.merchantId ? "접기" : "펼침"}
+                            </span>
+                          </button>
+
+                          {expandedUsageHistoryId === item.merchantId && (
+                            <div className="mt-2 space-y-1 text-xs">
+                              {getUsageHistoryRows(item).map((row, index) => (
+                                <div
+                                  key={`${row.cycleStartAt || index}-${index}`}
+                                  className="flex items-center justify-between gap-2 rounded-xl bg-white/70 px-2 py-1"
+                                >
+                                  <span>
+                                    {formatDate(row.cycleStartAt)} ~ {formatDate(row.cycleEndAt)}{" "}
+                                    {row.isCurrent ? "(이번 달)" : ""}
+                                  </span>
+                                  <span className="font-semibold">
+                                    {Number(row.usedCount || 0)}건 / {formatCurrency(row.amount || 0)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -812,34 +848,36 @@ export default function AdminDashboard() {
                       </div>
 
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                        <div className="rounded-2xl bg-slate-50 p-3">
-                          <div className="mb-2 text-xs font-semibold text-slate-500">주차권 추가</div>
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="number"
-                              min="1"
-                              step="1"
-                              value={ticketAddInputs[item.merchantId] || ""}
-                              onChange={(e) =>
-                                setTicketAddInputs((prev) => ({
-                                  ...prev,
-                                  [item.merchantId]: e.target.value,
-                                }))
-                              }
-                              placeholder="수량"
-                              className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                              disabled={loading || isPayAsYouGoPlan(item) || item.planLimit === -1 || item.planLimit === "unlimited"}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => addParkingTickets(item)}
-                              className="shrink-0 rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                              disabled={loading || isPayAsYouGoPlan(item) || item.planLimit === -1 || item.planLimit === "unlimited"}
-                            >
-                              추가
-                            </button>
+                        {!isPayAsYouGoPlan(item) && (
+                          <div className="rounded-2xl bg-slate-50 p-3">
+                            <div className="mb-2 text-xs font-semibold text-slate-500">주차권 추가</div>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min="1"
+                                step="1"
+                                value={ticketAddInputs[item.merchantId] || ""}
+                                onChange={(e) =>
+                                  setTicketAddInputs((prev) => ({
+                                    ...prev,
+                                    [item.merchantId]: e.target.value,
+                                  }))
+                                }
+                                placeholder="수량"
+                                className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                                disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => addParkingTickets(item)}
+                                className="shrink-0 rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
+                              >
+                                추가
+                              </button>
+                            </div>
                           </div>
-                        </div>
+                        )}
 
                         <div className="rounded-2xl bg-slate-50 p-3">
                           <div className="mb-2 text-xs font-semibold text-slate-500">관리</div>
