@@ -15,7 +15,51 @@ const API_BASE_URL =
 const API_PATHS = {
   requestPass: "/passes/request",
   merchantMe: "/merchant/me",
+  purchaseRequest: "/merchant/purchase-requests",
 };
+
+
+const PURCHASE_OPTIONS = [
+  { key: "single", label: "1장 구매", unit: 1, price: 1000, step: 1, helper: "수량은 1장 단위로 입력" },
+  { key: "bundle50", label: "50장 구매", unit: 50, price: 20000, step: 50, helper: "수량은 50장 단위로 입력" },
+  { key: "bundle100", label: "100장 구매", unit: 100, price: 15000, step: 100, helper: "수량은 100장 단위로 입력" },
+];
+
+const DEPOSIT_BANK_TEXT = "신한은행 : xxx-xx-xxxxxx (예금주 : 파킹크루즈)";
+
+function getPurchaseOption(key) {
+  return PURCHASE_OPTIONS.find((item) => item.key === key) || PURCHASE_OPTIONS[0];
+}
+
+function normalizePurchaseQuantity(key, value) {
+  const option = getPurchaseOption(key);
+  const raw = Number(String(value || "").replace(/\D/g, ""));
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return Math.floor(raw / option.step) * option.step;
+}
+
+function purchaseTotalAmount(key, quantity) {
+  const option = getPurchaseOption(key);
+  const qty = normalizePurchaseQuantity(key, quantity);
+  return qty > 0 ? Math.floor(qty / option.unit) * option.price : 0;
+}
+
+function getAvailablePasses(merchant) {
+  const candidates = [
+    merchant?.availablePasses,
+    merchant?.approvedPasses,
+    merchant?.purchasedPasses,
+    merchant?.remainingPasses,
+    merchant?.additionalPasses,
+  ];
+
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  }
+
+  return 0;
+}
 
 function clearAuthStorageOnly() {
   [
@@ -124,6 +168,9 @@ function mapMerchantFromApi(item) {
     planName: planLabel(planLimit, planType),
     monthlyQuota: planLimit,
     additionalPasses,
+    availablePasses: getAvailablePasses(item),
+    purchaseRequests: Array.isArray(item?.purchaseRequests) ? item.purchaseRequests : [],
+    purchaseHistory: Array.isArray(item?.purchaseHistory) ? item.purchaseHistory : [],
     totalLimit: planLimit === -1 || planType === "payg" ? -1 : planLimit + additionalPasses,
     estimatedAmount: planType === "payg" ? Number(item?.estimatedAmount ?? Number(item?.usedCount || 0) * unitPrice) : 0,
     usageHistory: Array.isArray(item?.usageHistory) ? item.usageHistory : [],
@@ -608,6 +655,46 @@ async function requestParkingPass({
   return data || {};
 }
 
+async function submitPurchaseRequest({ purchaseType, quantity }) {
+  const option = getPurchaseOption(purchaseType);
+  const normalizedQuantity = normalizePurchaseQuantity(purchaseType, quantity);
+
+  if (normalizedQuantity <= 0) {
+    throw new Error(`${option.step}장 단위로 구매 수량을 입력해 주세요.`);
+  }
+
+  const token = await getIdToken();
+  const response = await fetch(`${API_BASE_URL}${API_PATHS.purchaseRequest}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      purchaseType,
+      label: option.label,
+      unit: option.unit,
+      unitPrice: option.price,
+      quantity: normalizedQuantity,
+      totalAmount: purchaseTotalAmount(purchaseType, normalizedQuantity),
+      status: "PENDING",
+    }),
+  });
+
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.message || `구매 요청에 실패했습니다. (${response.status})`);
+  }
+
+  return data;
+}
+
 async function requestQrParkingPass({
   visitorName,
   parkingGateIds,
@@ -690,6 +777,9 @@ export default function MerchantDashboard() {
   const [favoriteModalOpen, setFavoriteModalOpen] = useState(false);
   const [issuedInvite, setIssuedInvite] = useState(null);
   const [inviteResultModalOpen, setInviteResultModalOpen] = useState(false);
+  const [purchaseInputs, setPurchaseInputs] = useState(() => ({ single: "", bundle50: "", bundle100: "" }));
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [purchaseBusy, setPurchaseBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -781,35 +871,8 @@ export default function MerchantDashboard() {
   const accountText = useMemo(() => merchantAccountText(merchant), [merchant]);
 
   const remainingPasses = useMemo(() => {
-    if (isPayAsYouGo) return 999999;
-    if (isUnlimitedPlan) return 999999;
-
-    const cycleStartTime = billingCycle.start?.getTime?.() || 0;
-    const cycleEndTime = billingCycle.end?.getTime?.() || Number.MAX_SAFE_INTEGER;
-    const localUsedCount = invites.reduce((sum, item) => {
-      if (item.status === "취소") return sum;
-      const createdAt = new Date(item.createdAt).getTime();
-      if (Number.isNaN(createdAt)) return sum;
-      if (createdAt < cycleStartTime || createdAt >= cycleEndTime) return sum;
-      return sum + Number(item.usageLimit || 1);
-    }, 0);
-
-    const serverUsedCount = Number(merchant.usedCount || 0);
-    const usedCount = Math.max(serverUsedCount, localUsedCount);
-    const monthlyQuota = Number(merchant.monthlyQuota || 0);
-    const additionalPasses = Number(merchant.additionalPasses || 0);
-    const totalLimit = monthlyQuota + additionalPasses;
-
-    return Math.max(totalLimit - usedCount, 0);
-  }, [
-    invites,
-    merchant.monthlyQuota,
-    merchant.additionalPasses,
-    merchant.usedCount,
-    isPayAsYouGo,
-    isUnlimitedPlan,
-    billingCycle,
-  ]);
+    return getAvailablePasses(merchant);
+  }, [merchant]);
 
   const remainingPassesRef = useRef(remainingPasses);
   useEffect(() => {
@@ -1259,6 +1322,58 @@ export default function MerchantDashboard() {
   }
 
 
+  async function copyDepositAccount() {
+    try {
+      await navigator.clipboard.writeText(DEPOSIT_BANK_TEXT);
+      setToast("계좌번호를 복사했습니다.");
+    } catch {
+      setError("계좌번호 복사에 실패했습니다.");
+    }
+  }
+
+  async function handleSubmitPurchaseRequest(purchaseType) {
+    const option = getPurchaseOption(purchaseType);
+    const quantity = normalizePurchaseQuantity(purchaseType, purchaseInputs[purchaseType]);
+
+    if (quantity <= 0) {
+      setError(`${option.step}장 단위로 구매 수량을 입력해 주세요.`);
+      return;
+    }
+
+    setError("");
+    setPurchaseBusy(true);
+    try {
+      const result = await submitPurchaseRequest({ purchaseType, quantity });
+      const nextRequest = result.request || result.item || {
+        requestId: safeUuid(),
+        purchaseType,
+        label: option.label,
+        unit: option.unit,
+        unitPrice: option.price,
+        quantity,
+        totalAmount: purchaseTotalAmount(purchaseType, quantity),
+        status: "PENDING",
+        createdAt: nowIso(),
+      };
+
+      setMerchant((prev) => {
+        const nextMerchant = {
+          ...prev,
+          purchaseRequests: [nextRequest, ...(Array.isArray(prev.purchaseRequests) ? prev.purchaseRequests : [])],
+        };
+        localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(nextMerchant));
+        return nextMerchant;
+      });
+      setPurchaseInputs((prev) => ({ ...prev, [purchaseType]: "" }));
+      setPurchaseModalOpen(true);
+      setToast("구매 요청이 등록되었습니다. 관리자 승인 후 사용할 수 있습니다.");
+    } catch (err) {
+      setError(err?.message || "구매 요청 중 오류가 발생했습니다.");
+    } finally {
+      setPurchaseBusy(false);
+    }
+  }
+
   function handleIssueQrPass() {
     setError("");
     setQrModalNotice("");
@@ -1473,44 +1588,18 @@ export default function MerchantDashboard() {
     setToast("로컬 발행 내역을 초기화했습니다.");
   }
 
-  const monthlyQuotaValue = Number(merchant.monthlyQuota || 0);
-  const additionalPassesValue = Number(merchant.additionalPasses || 0);
-  const totalLimitValue = isUnlimitedPlan ? -1 : monthlyQuotaValue + additionalPassesValue;
-  const monthlyUsedCount = Number(merchant.usedCount || 0);
-  const estimatedMonthlyAmount = isPayAsYouGo ? monthlyUsedCount * unitPrice : 0;
-  const currentUsageHistory = useMemo(() => ({
-    cycleStartAt: billingCycle.start?.toISOString?.() || "",
-    cycleEndAt: billingCycle.end?.toISOString?.() || "",
-    usedCount: monthlyUsedCount,
-    planType: isPayAsYouGo ? "payg" : "subscription",
-    unitPrice,
-    amount: isPayAsYouGo ? estimatedMonthlyAmount : 0,
-    isCurrent: true,
-  }), [billingCycle, monthlyUsedCount, isPayAsYouGo, unitPrice, estimatedMonthlyAmount]);
-  const usageHistoryRows = useMemo(() => {
-    const history = Array.isArray(merchant.usageHistory) ? merchant.usageHistory : [];
-    const sortedHistory = history
-      .slice()
-      .sort((a, b) => {
-        const aTime = new Date(a?.cycleStartAt || a?.closedAt || 0).getTime();
-        const bTime = new Date(b?.cycleStartAt || b?.closedAt || 0).getTime();
-        return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
-      });
+  const availablePassesValue = getAvailablePasses(merchant);
+  const pendingPurchaseRequests = useMemo(() => {
+    return Array.isArray(merchant.purchaseRequests)
+      ? merchant.purchaseRequests.filter((item) => String(item?.status || "PENDING").toUpperCase() === "PENDING")
+      : [];
+  }, [merchant.purchaseRequests]);
 
-    return [currentUsageHistory, ...sortedHistory].slice(0, 6);
-  }, [currentUsageHistory, merchant.usageHistory]);
-
-  const stats = isPayAsYouGo
-    ? [
-        { label: "이번 달 사용", value: `${monthlyUsedCount}건` },
-        { label: "오늘 발행", value: `${todayIssued}건` },
-        { label: "이번 달 예상요금", value: formatCurrency(estimatedMonthlyAmount) },
-      ]
-    : [
-        { label: "잔여 주차권", value: isUnlimitedPlan ? "무제한" : `${remainingPasses}` },
-        { label: "오늘 발행", value: `${todayIssued}` },
-        { label: "이번 달 한도", value: isUnlimitedPlan ? "무제한" : `${totalLimitValue}` },
-      ];
+  const stats = [
+    { label: "사용 가능 주차권", value: `${availablePassesValue}장` },
+    { label: "오늘 발행", value: `${todayIssued}건` },
+    { label: "승인 대기 구매", value: `${pendingPurchaseRequests.length}건` },
+  ];
 
 
   return (
@@ -1921,6 +2010,24 @@ export default function MerchantDashboard() {
         </div>
       </Modal>
 
+      <Modal open={purchaseModalOpen} title="무통장 입금" onClose={() => setPurchaseModalOpen(false)}>
+        <div className="space-y-4">
+          <div className="rounded-2xl bg-slate-50 p-4 text-center">
+            <p className="text-lg font-bold text-slate-900">무통장 입금</p>
+            <p className="mt-3 text-base font-semibold text-slate-800">신한은행 : xxx-xx-xxxxxx</p>
+            <p className="mt-1 text-sm text-slate-600">예금주 : 파킹크루즈</p>
+          </div>
+          <button
+            type="button"
+            onClick={copyDepositAccount}
+            className="w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:opacity-90"
+          >
+            계좌번호 복사
+          </button>
+          <p className="text-xs leading-relaxed text-slate-500">입금 후 관리자가 구매 요청을 승인하면 해당 수량이 사용 가능 주차권에 반영됩니다.</p>
+        </div>
+      </Modal>
+
       <main className="mx-auto grid max-w-7xl gap-3 px-3 py-3 sm:px-4 lg:grid-cols-12 lg:px-6">
         <section className="space-y-3 lg:col-span-8">
           <form onSubmit={handleOpenConfirm} className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
@@ -1933,11 +2040,8 @@ export default function MerchantDashboard() {
               </div>
 
               <div className="flex shrink-0 items-center gap-2">
-                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                  D-{rechargeDday}
-                </span>
                 <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                  {isPayAsYouGo ? `종량제 · ${formatCurrency(unitPrice)}/건` : `잔여 주차권 ${isUnlimitedPlan ? "무제한" : String(remainingPasses) + "건"}`}
+                  사용 가능 {availablePassesValue}장
                 </span>
               </div>
             </div>
@@ -2076,77 +2180,60 @@ export default function MerchantDashboard() {
             ))}
           </div>
 
-          {isPayAsYouGo ? (
-            <div className="mt-2 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-950 ring-1 ring-emerald-100">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-semibold">종량제 단가</span>
-                <span className="text-lg font-black">{formatCurrency(unitPrice)} / 건</span>
+          <div className="mt-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-base font-semibold sm:text-lg">정액제 주차권 구매 요청</h2>
+                <p className="mt-1 text-xs text-slate-500">요청한 수량은 관리자가 승인한 후 사용 가능 주차권에 반영됩니다.</p>
               </div>
-              <p className="mt-1 text-xs text-emerald-700">
-                월 한도 없이 발행한 사용량 기준으로 예상요금이 계산됩니다. 현재 청구기간: {billingPeriodText}
-              </p>
-            </div>
-          ) : (
-            <div className="mt-2 rounded-2xl bg-indigo-50 px-4 py-3 text-sm text-indigo-950 ring-1 ring-indigo-100">
-              <div className="flex items-center justify-between gap-3">
-                <span className="font-semibold">추가 주차권</span>
-                <span className="text-lg font-black">
-                  {isUnlimitedPlan ? "무제한" : `${additionalPassesValue}`}
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-indigo-700">
-                기본 월 한도를 먼저 사용하고, 초과분부터 추가 주차권이 사용됩니다. 남은 추가 주차권은 다음 달로 이월됩니다.
-              </p>
-            </div>
-          )}
-
-          {isPayAsYouGo ? (
-            <div className="mt-2 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
               <button
                 type="button"
-                onClick={() => setShowUsageHistoryPanel((prev) => !prev)}
-                className="flex w-full items-center justify-between gap-3 text-left"
+                onClick={() => setPurchaseModalOpen(true)}
+                className="rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-slate-50"
               >
-                <div>
-                  <h2 className="text-base font-semibold">월별 사용량 히스토리</h2>
-                  <p className="mt-1 text-xs text-slate-500">
-                    최신 사용기간이 상단에 표시됩니다.
-                  </p>
-                </div>
-                <span className="rounded-full border px-3 py-1 text-xs font-semibold text-slate-700">
-                  {showUsageHistoryPanel ? "접기" : "펼침"}
-                </span>
+                결제 안내
               </button>
-
-              {showUsageHistoryPanel && (
-                <div className="mt-3 overflow-x-auto">
-                  <table className="w-full min-w-[520px] text-left text-xs">
-                    <thead className="text-slate-500">
-                      <tr className="border-b">
-                        <th className="py-2">기간</th>
-                        <th className="py-2 text-right">사용량</th>
-                        <th className="py-2 text-right">단가</th>
-                        <th className="py-2 text-right">요금</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {usageHistoryRows.map((row, index) => (
-                        <tr key={`${row.cycleStartAt || index}-${index}`} className="border-b last:border-0">
-                          <td className="py-2">
-                            {displayDateOnly(row.cycleStartAt)} ~ {displayDateOnly(row.cycleEndAt)}{" "}
-                            {row.isCurrent ? "(이번 달)" : ""}
-                          </td>
-                          <td className="py-2 text-right font-semibold">{Number(row.usedCount || 0)}건</td>
-                          <td className="py-2 text-right">{formatCurrency(row.unitPrice || 0)}</td>
-                          <td className="py-2 text-right font-bold">{formatCurrency(row.amount || 0)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
             </div>
-          ) : null}
+
+            <div className="mt-3 grid gap-2">
+              {PURCHASE_OPTIONS.map((option) => {
+                const quantity = normalizePurchaseQuantity(option.key, purchaseInputs[option.key]);
+                const totalAmount = purchaseTotalAmount(option.key, quantity);
+
+                return (
+                  <div key={option.key} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="grid gap-2 sm:grid-cols-[1fr_140px_1fr_auto] sm:items-center">
+                      <div>
+                        <div className="font-semibold text-slate-900">{option.label}</div>
+                        <div className="mt-1 text-xs text-slate-500">{option.helper}</div>
+                      </div>
+                      <input
+                        type="number"
+                        min={option.step}
+                        step={option.step}
+                        value={purchaseInputs[option.key]}
+                        onChange={(e) => setPurchaseInputs((prev) => ({ ...prev, [option.key]: e.target.value }))}
+                        placeholder="수량"
+                        className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
+                      />
+                      <div className="text-sm text-slate-700">
+                        <div>단가: <span className="font-semibold">{formatCurrency(option.price)}</span> / {option.unit}장</div>
+                        <div>총 비용: <span className="font-bold text-slate-950">{formatCurrency(totalAmount)}</span></div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleSubmitPurchaseRequest(option.key)}
+                        disabled={purchaseBusy || quantity <= 0}
+                        className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        요청
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           {showHistoryPanel ? (
             <div className="rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
@@ -2265,25 +2352,11 @@ export default function MerchantDashboard() {
                   {merchant.isActive === false ? "비활성" : "활성"}
                 </span>
               </div>
-              <div className="flex justify-between gap-4">
-                <span className="shrink-0 text-slate-500">사용 기간</span>
-                <span className="text-right font-medium">{billingPeriodText}</span>
-              </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">요금제</span>
-                <span className="font-medium">{planLabel(merchant.planLimit ?? merchant.monthlyQuota, merchant.planType)}</span>
+                <span className="text-slate-500">사용 가능 주차권</span>
+                <span className="font-medium">{availablePassesValue}장</span>
               </div>
             </div>
-          </div>
-
-          <div className="rounded-2xl bg-white px-4 py-4 text-center shadow-sm ring-1 ring-slate-200">
-            <p className="text-4xl font-black tracking-tight text-blue-700 sm:text-5xl">
-              D-{rechargeDday}
-            </p>
-            <div className="mx-auto mt-3 h-px max-w-xs bg-slate-200" />
-            <p className="mt-3 break-words text-sm font-semibold text-slate-900">
-              {accountText}
-            </p>
           </div>
         </aside>
       </main>

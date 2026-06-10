@@ -5,7 +5,11 @@ import { clearSession } from "../auth/auth.js";
 import { fetchAuthSession } from "aws-amplify/auth";
 
 const API_BASE = "https://8q72reoak2.execute-api.ap-northeast-2.amazonaws.com";
-const PLAN_OPTIONS = [100, 200, 300, 400, 500, "unlimited", "payg"];
+const PURCHASE_OPTIONS = {
+  single: { label: "1장 구매", unit: 1, price: 1000 },
+  bundle50: { label: "50장 구매", unit: 50, price: 20000 },
+  bundle100: { label: "100장 구매", unit: 100, price: 15000 },
+};
 
 function formatDate(value) {
   if (!value) return "-";
@@ -46,6 +50,49 @@ function getUnitPrice(item) {
 function formatCurrency(value) {
   const n = Number(value || 0);
   return `${new Intl.NumberFormat("ko-KR").format(Math.max(n, 0))}원`;
+}
+
+function purchaseOptionLabel(type) {
+  return PURCHASE_OPTIONS[type]?.label || type || "-";
+}
+
+function getPurchaseRequests(item) {
+  const requests = item?.purchaseRequests || item?.passPurchaseRequests || item?.ticketPurchaseRequests || [];
+  return Array.isArray(requests) ? requests : [];
+}
+
+function getPendingPurchaseRequests(item) {
+  return getPurchaseRequests(item).filter((row) => String(row?.status || "PENDING").toUpperCase() === "PENDING");
+}
+
+function getPurchaseHistoryRows(item) {
+  const requests = getPurchaseRequests(item);
+  const history = item?.purchaseHistory || item?.passPurchaseHistory || item?.ticketPurchaseHistory || [];
+  const rows = [...requests, ...(Array.isArray(history) ? history : [])];
+
+  return rows
+    .filter(Boolean)
+    .sort((a, b) => {
+      const aTime = new Date(a?.createdAt || a?.requestedAt || a?.approvedAt || 0).getTime();
+      const bTime = new Date(b?.createdAt || b?.requestedAt || b?.approvedAt || 0).getTime();
+      return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+    });
+}
+
+function purchaseStatusLabel(status) {
+  const value = String(status || "PENDING").toUpperCase();
+  if (value === "APPROVED") return "승인";
+  if (value === "REJECTED") return "거절";
+  return "승인 대기";
+}
+
+function getAvailablePasses(item) {
+  const candidates = [item?.availablePasses, item?.approvedPasses, item?.purchasedPasses, item?.remainingPasses, item?.additionalPasses];
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 0) return Math.floor(n);
+  }
+  return 0;
 }
 
 function getKstDateKey(date = new Date()) {
@@ -240,8 +287,7 @@ export default function AdminDashboard() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [ticketAddInputs, setTicketAddInputs] = useState({});
-  const [expandedUsageHistoryId, setExpandedUsageHistoryId] = useState("");
+  const [expandedPurchaseHistoryId, setExpandedPurchaseHistoryId] = useState("");
 
   const filteredMerchants = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -383,97 +429,38 @@ export default function AdminDashboard() {
   }
 
 
-  function getAdditionalPasses(item) {
-    return Number(item?.additionalPasses || item?.extraPasses || item?.addedPasses || 0);
-  }
+  async function approvePurchaseRequest(item, request) {
+    if (!item?.merchantId || !request) return;
 
-  function getMonthlyTotalLimit(item) {
-    if (isPayAsYouGoPlan(item)) return -1;
-    if (item?.planLimit === -1 || item?.planLimit === "unlimited") return -1;
-    const monthlyQuota = Number(item?.monthlyQuota ?? item?.planLimit ?? 0);
-    return monthlyQuota + getAdditionalPasses(item);
-  }
-
-  function getUsageHistoryRows(item) {
-    const currentUnitPrice = getUnitPrice(item);
-    const current = {
-      cycleStartAt: item?.usageCycleStartedAt || item?.approvedAt || item?.createdAt || "",
-      cycleEndAt: item?.usageCycleEndAt || getSubscriptionEndValue(item),
-      usedCount: Number(item?.usedCount || 0),
-      planType: isPayAsYouGoPlan(item) ? "payg" : "subscription",
-      unitPrice: currentUnitPrice,
-      amount: isPayAsYouGoPlan(item) ? Number(item?.usedCount || 0) * currentUnitPrice : 0,
-      isCurrent: true,
-    };
-
-    const history = Array.isArray(item?.usageHistory) ? item.usageHistory : [];
-    const sortedHistory = history
-      .slice()
-      .sort((a, b) => {
-        const aTime = new Date(a?.cycleStartAt || a?.closedAt || 0).getTime();
-        const bTime = new Date(b?.cycleStartAt || b?.closedAt || 0).getTime();
-        return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
-      });
-
-    return [current, ...sortedHistory].slice(0, 6);
-  }
-
-  async function addParkingTickets(item) {
-    if (!item?.merchantId) return;
-
-    if (item.planLimit === -1 || item.planLimit === "unlimited") {
-      alert("무제한 요금제는 주차권 추가가 필요하지 않습니다.");
+    const quantity = Number(request.quantity || 0);
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      alert("승인할 구매 수량이 올바르지 않습니다.");
       return;
     }
 
-    const rawValue = ticketAddInputs[item.merchantId] ?? "";
-    const addCount = Number(rawValue);
-
-    if (!Number.isInteger(addCount) || addCount <= 0) {
-      alert("추가할 주차권 수량을 1 이상의 정수로 입력해 주세요.");
-      return;
-    }
-
-    const currentAdditionalPasses = getAdditionalPasses(item);
-    const nextAdditionalPasses = currentAdditionalPasses + addCount;
-
-    const ok = window.confirm(
-      `이번 달 추가 주차권에 ${addCount}장을 추가하시겠습니까?\n현재 추가 주차권: ${currentAdditionalPasses}장 → 변경 후: ${nextAdditionalPasses}장`
-    );
+    const ok = window.confirm(`${merchantDisplayName(item)}의 ${purchaseOptionLabel(request.purchaseType)} ${quantity}장을 승인하시겠습니까?`);
     if (!ok) return;
 
-    await updateMerchant(item.merchantId, { additionalPasses: nextAdditionalPasses });
-    setTicketAddInputs((prev) => ({ ...prev, [item.merchantId]: "" }));
-    alert("이번 달 사용 주차권에 추가되었습니다.");
-  }
-
-  async function changePlan(item, value) {
-    if (!item?.merchantId) return;
-    if (value === "payg") {
-      const currentUnitPrice = getUnitPrice(item);
-      await updateMerchant(item.merchantId, {
-        planType: "payg",
-        planLimit: "payg",
-        unitPrice: currentUnitPrice,
-        additionalPasses: 0,
+    try {
+      setLoading(true);
+      const requestId = request.requestId || request.id || request.createdAt || "latest";
+      await apiFetch(`/admin/merchants/${encodeURIComponent(item.merchantId)}/purchase-requests/${encodeURIComponent(requestId)}/approve`, {
+        method: "POST",
+        body: JSON.stringify({
+          requestId,
+          purchaseType: request.purchaseType,
+          quantity,
+          totalAmount: Number(request.totalAmount || 0),
+        }),
       });
-      return;
+      await loadData();
+      alert("구매 요청이 승인되었습니다.");
+    } catch (err) {
+      console.error(err);
+      alert(err.message || "구매 요청 승인 실패");
+    } finally {
+      setLoading(false);
     }
-    await updateMerchant(item.merchantId, {
-      planType: "subscription",
-      planLimit: value,
-      unitPrice: 0,
-    });
-  }
-
-  async function updateUnitPrice(item, value) {
-    if (!item?.merchantId) return;
-    const unitPrice = Number(value);
-    if (!Number.isInteger(unitPrice) || unitPrice < 0) {
-      alert("개당 요금은 0 이상의 정수로 입력해 주세요.");
-      return;
-    }
-    await updateMerchant(item.merchantId, { planType: "payg", unitPrice });
   }
 
   async function resetPassword(merchantId) {
@@ -543,57 +530,6 @@ export default function AdminDashboard() {
             {message}
           </div>
         )}
-
-        <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h2 className="text-xl font-bold">사용기간 알림</h2>
-              <p className="mt-2 text-sm text-slate-600">
-                만료되었거나 7일 이내 만료 예정인 상가를 확인할 수 있습니다.
-              </p>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-center text-sm">
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
-                <div className="text-xs font-semibold text-rose-600">만료</div>
-                <div className="mt-1 text-2xl font-bold text-rose-700">{expireAlert.expired.length}</div>
-              </div>
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-                <div className="text-xs font-semibold text-amber-700">7일 이내</div>
-                <div className="mt-1 text-2xl font-bold text-amber-700">{expireAlert.expiring.length}</div>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div className="text-xs font-semibold text-slate-600">기간 미설정</div>
-                <div className="mt-1 text-2xl font-bold text-slate-700">{expireAlert.missing.length}</div>
-              </div>
-            </div>
-          </div>
-
-          {expireAlert.attentionList.length > 0 ? (
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="mb-2 text-sm font-semibold text-slate-700">만료/만료 예정 상가</div>
-              <div className="space-y-2">
-                {expireAlert.attentionList.map(({ item, status }) => (
-                  <div
-                    key={item.merchantId}
-                    className="flex flex-col gap-2 rounded-xl bg-white px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="font-semibold text-slate-800">{merchantDisplayName(item)}</div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                      <span className={`rounded-full border px-2 py-1 font-semibold ${status.badgeClass}`}>
-                        {status.label}
-                      </span>
-                      <span>종료일: {formatDate(getSubscriptionEndValue(item))}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-              만료 또는 7일 이내 만료 예정인 상가가 없습니다.
-            </div>
-          )}
-        </section>
 
         <section className="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
           <div className="flex items-center justify-between gap-3">
@@ -680,17 +616,16 @@ export default function AdminDashboard() {
               </div>
             ) : (
               filteredMerchants.map((item) => {
-                const status = getSubscriptionStatus(item);
-                const totalLimit = getMonthlyTotalLimit(item);
-                const additionalPasses = getAdditionalPasses(item);
+                const pendingRequests = getPendingPurchaseRequests(item);
+                const historyRows = getPurchaseHistoryRows(item);
 
                 return (
                   <div
                     key={item.merchantId}
                     className="rounded-2xl border border-slate-200 bg-white p-4"
                   >
-                    <div className="grid gap-4 lg:grid-cols-[1.35fr_1.15fr_1fr]">
-                      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid gap-4 lg:grid-cols-[1.25fr_1fr_1fr]">
+                      <div className="grid gap-3 sm:grid-cols-2">
                         <div>
                           <div className="text-xs font-semibold text-slate-500">아이디</div>
                           <div className="mt-1 break-all font-semibold">
@@ -706,116 +641,53 @@ export default function AdminDashboard() {
                           <div className="mt-1">{item.roomNo || "-"}</div>
                         </div>
                         <div>
-                          <div className="text-xs font-semibold text-slate-500">요금제</div>
-                          <select
-                            value={isPayAsYouGoPlan(item) ? "payg" : item.planLimit === -1 ? "unlimited" : item.planLimit}
-                            onChange={(e) => changePlan(item, e.target.value)}
-                            className="mt-1 w-full max-w-[130px] rounded-xl border px-3 py-2"
-                            disabled={loading}
-                          >
-                            {PLAN_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
-                                {option === "unlimited" ? "무제한" : option === "payg" ? "종량제" : option}
-                              </option>
-                            ))}
-                          </select>
-                          {isPayAsYouGoPlan(item) && (
-                            <div className="mt-2 flex items-center gap-2">
-                              <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                defaultValue={getUnitPrice(item)}
-                                onBlur={(e) => updateUnitPrice(item, e.target.value)}
-                                className="w-24 rounded-xl border px-2 py-1 text-sm"
-                                disabled={loading}
-                              />
-                              <span className="text-xs text-slate-500">원/건</span>
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <div className="text-xs font-semibold text-slate-500">사용 횟수</div>
-                          <div className="mt-1 whitespace-nowrap">
-                            {isPayAsYouGoPlan(item) ? (
-                              <>
-                                <div>이번달 {item.usedCount || 0}건</div>
-                                <div className="text-xs text-slate-500">
-                                  오늘 {getTodayIssuedCount(item)}건
-                                </div>
-                                <div className="text-xs text-emerald-700">
-                                  예상 {formatCurrency(Number(item.usedCount || 0) * getUnitPrice(item))}
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <div>
-                                  {item.usedCount || 0} / {totalLimit === -1 ? "무제한" : `${totalLimit}건`}
-                                </div>
-                                <div className="text-xs text-slate-500">
-                                  오늘 {getTodayIssuedCount(item)}건
-                                </div>
-                                {totalLimit !== -1 && additionalPasses > 0 && (
-                                  <div className="text-xs text-slate-500">
-                                    기본 {item.monthlyQuota ?? item.planLimit ?? 0}건 + 추가 {additionalPasses}건
-                                  </div>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-xs font-semibold text-slate-500">사용기간 상태</div>
-                          <div className="mt-1 space-y-1">
-                            <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${status.badgeClass}`}>
-                              {status.label}
-                            </span>
-                            <div className="text-xs leading-5 text-slate-500">
-                              종료: {formatDate(getSubscriptionEndValue(item))}
-                            </div>
-                          </div>
+                          <div className="text-xs font-semibold text-slate-500">사용 가능 주차권</div>
+                          <div className="mt-1 font-bold text-slate-900">{getAvailablePasses(item)}장</div>
+                          <div className="text-xs text-slate-500">오늘 {getTodayIssuedCount(item)}건 발행</div>
                         </div>
                       </div>
 
-                      {isPayAsYouGoPlan(item) && (
-                        <div className="rounded-2xl bg-emerald-50 p-3 ring-1 ring-emerald-100">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExpandedUsageHistoryId((prev) =>
-                                prev === item.merchantId ? "" : item.merchantId
-                              )
-                            }
-                            className="flex w-full items-center justify-between gap-3 text-left"
-                          >
-                            <span className="text-xs font-semibold text-emerald-700">
-                              종량제 사용량 히스토리
-                            </span>
-                            <span className="rounded-full bg-white/80 px-2 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-100">
-                              {expandedUsageHistoryId === item.merchantId ? "접기" : "펼침"}
-                            </span>
-                          </button>
-
-                          {expandedUsageHistoryId === item.merchantId && (
-                            <div className="mt-2 space-y-1 text-xs">
-                              {getUsageHistoryRows(item).map((row, index) => (
-                                <div
-                                  key={`${row.cycleStartAt || index}-${index}`}
-                                  className="flex items-center justify-between gap-2 rounded-xl bg-white/70 px-2 py-1"
-                                >
-                                  <span>
-                                    {formatDate(row.cycleStartAt)} ~ {formatDate(row.cycleEndAt)}{" "}
-                                    {row.isCurrent ? "(이번 달)" : ""}
-                                  </span>
-                                  <span className="font-semibold">
-                                    {Number(row.usedCount || 0)}건 / {formatCurrency(row.amount || 0)}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                      <div className="rounded-2xl bg-blue-50 p-3 ring-1 ring-blue-100">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="text-xs font-semibold text-blue-700">구매 승인 요청</div>
+                          <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-blue-700 ring-1 ring-blue-100">
+                            {pendingRequests.length}건
+                          </span>
                         </div>
-                      )}
+                        {pendingRequests.length === 0 ? (
+                          <div className="rounded-xl bg-white/70 px-3 py-4 text-center text-xs text-slate-500">
+                            승인 대기 구매 요청이 없습니다.
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {pendingRequests.map((request, index) => (
+                              <div key={request.requestId || request.id || index} className="rounded-xl bg-white p-2 text-xs">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <div className="font-semibold text-slate-900">
+                                      {purchaseOptionLabel(request.purchaseType)} / {Number(request.quantity || 0)}장
+                                    </div>
+                                    <div className="mt-1 text-slate-500">
+                                      요청일: {formatDate(request.createdAt || request.requestedAt)}
+                                    </div>
+                                    <div className="mt-1 text-slate-600">
+                                      금액: {formatCurrency(request.totalAmount || 0)}
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => approvePurchaseRequest(item, request)}
+                                    className="shrink-0 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={loading}
+                                  >
+                                    승인
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
 
                       <div className="rounded-2xl bg-slate-50 p-3">
                         <div className="mb-2 text-xs font-semibold text-slate-500">차단기 MAC 주소</div>
@@ -845,41 +717,8 @@ export default function AdminDashboard() {
                             </label>
                           ))}
                         </div>
-                      </div>
 
-                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                        {!isPayAsYouGoPlan(item) && (
-                          <div className="rounded-2xl bg-slate-50 p-3">
-                            <div className="mb-2 text-xs font-semibold text-slate-500">주차권 추가</div>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="number"
-                                min="1"
-                                step="1"
-                                value={ticketAddInputs[item.merchantId] || ""}
-                                onChange={(e) =>
-                                  setTicketAddInputs((prev) => ({
-                                    ...prev,
-                                    [item.merchantId]: e.target.value,
-                                  }))
-                                }
-                                placeholder="수량"
-                                className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
-                                disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => addParkingTickets(item)}
-                                className="shrink-0 rounded-xl border border-blue-300 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                disabled={loading || item.planLimit === -1 || item.planLimit === "unlimited"}
-                              >
-                                추가
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="rounded-2xl bg-slate-50 p-3">
+                        <div className="mt-3 rounded-2xl bg-white p-3">
                           <div className="mb-2 text-xs font-semibold text-slate-500">관리</div>
                           <div className="flex flex-wrap items-center gap-2">
                             <label className="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-xs whitespace-nowrap">
@@ -907,6 +746,59 @@ export default function AdminDashboard() {
                           </div>
                         </div>
                       </div>
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedPurchaseHistoryId((prev) =>
+                            prev === item.merchantId ? "" : item.merchantId
+                          )
+                        }
+                        className="flex w-full items-center justify-between gap-3 text-left"
+                      >
+                        <div>
+                          <div className="text-sm font-semibold text-slate-800">구매 히스토리</div>
+                          <div className="mt-1 text-xs text-slate-500">날짜별 요청한 구매단위와 수량을 확인합니다.</div>
+                        </div>
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                          {expandedPurchaseHistoryId === item.merchantId ? "접기" : "펼치기"}
+                        </span>
+                      </button>
+
+                      {expandedPurchaseHistoryId === item.merchantId && (
+                        <div className="mt-3 overflow-x-auto">
+                          <table className="w-full min-w-[520px] text-left text-xs">
+                            <thead className="border-b text-slate-500">
+                              <tr>
+                                <th className="py-2">날짜</th>
+                                <th>구매단위</th>
+                                <th className="text-right">수량</th>
+                                <th className="text-right">금액</th>
+                                <th className="text-right">상태</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {historyRows.length === 0 ? (
+                                <tr>
+                                  <td colSpan="5" className="py-5 text-center text-slate-500">구매 히스토리가 없습니다.</td>
+                                </tr>
+                              ) : (
+                                historyRows.map((row, index) => (
+                                  <tr key={row.requestId || row.id || index} className="border-b last:border-0">
+                                    <td className="py-2">{formatDate(row.createdAt || row.requestedAt || row.approvedAt)}</td>
+                                    <td>{purchaseOptionLabel(row.purchaseType)}</td>
+                                    <td className="text-right font-semibold">{Number(row.quantity || 0)}장</td>
+                                    <td className="text-right">{formatCurrency(row.totalAmount || 0)}</td>
+                                    <td className="text-right">{purchaseStatusLabel(row.status)}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
