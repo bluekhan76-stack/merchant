@@ -20,9 +20,9 @@ const API_PATHS = {
 
 
 const PURCHASE_OPTIONS = [
-  { key: "single", label: "1장 구매", unit: 1, price: 1000, step: 1, helper: "수량은 1장 단위로 입력" },
-  { key: "bundle50", label: "50장 구매", unit: 50, price: 20000, step: 50, helper: "수량은 50장 단위로 입력" },
-  { key: "bundle100", label: "100장 구매", unit: 100, price: 15000, step: 100, helper: "수량은 100장 단위로 입력" },
+  { key: "single", label: "1장 구매", unit: 1, price: 1000, step: 1, helper: "수량 1 입력 = 1장", inputLabel: "장" },
+  { key: "bundle50", label: "50장 구매", unit: 50, price: 20000, step: 1, helper: "수량 1 입력 = 50장 1세트", inputLabel: "세트" },
+  { key: "bundle100", label: "100장 구매", unit: 100, price: 15000, step: 1, helper: "수량 1 입력 = 100장 1세트", inputLabel: "세트" },
 ];
 
 const DEPOSIT_BANK_TEXT = "신한은행 : xxx-xx-xxxxxx (예금주 : 파킹크루즈)";
@@ -35,13 +35,22 @@ function normalizePurchaseQuantity(key, value) {
   const option = getPurchaseOption(key);
   const raw = Number(String(value || "").replace(/\D/g, ""));
   if (!Number.isFinite(raw) || raw <= 0) return 0;
-  return Math.floor(raw / option.step) * option.step;
+
+  // 입력 칸의 값은 구매 단위 수량입니다.
+  // 예: 50장 구매에서 1 입력 = 50장 1세트, 2 입력 = 100장 2세트
+  return Math.floor(raw) * option.unit;
 }
 
 function purchaseTotalAmount(key, quantity) {
   const option = getPurchaseOption(key);
   const qty = normalizePurchaseQuantity(key, quantity);
   return qty > 0 ? Math.floor(qty / option.unit) * option.price : 0;
+}
+
+function purchaseSetCount(key, quantity) {
+  const option = getPurchaseOption(key);
+  const qty = normalizePurchaseQuantity(key, quantity);
+  return qty > 0 ? Math.floor(qty / option.unit) : 0;
 }
 
 function getAvailablePasses(merchant) {
@@ -657,10 +666,10 @@ async function requestParkingPass({
 
 async function submitPurchaseRequest({ purchaseType, quantity }) {
   const option = getPurchaseOption(purchaseType);
-  const normalizedQuantity = normalizePurchaseQuantity(purchaseType, quantity);
+  const normalizedQuantity = Number(quantity || 0);
 
-  if (normalizedQuantity <= 0) {
-    throw new Error(`${option.step}장 단위로 구매 수량을 입력해 주세요.`);
+  if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+    throw new Error(`${option.label} 수량을 1 이상 입력해 주세요.`);
   }
 
   const token = await getIdToken();
@@ -676,7 +685,7 @@ async function submitPurchaseRequest({ purchaseType, quantity }) {
       unit: option.unit,
       unitPrice: option.price,
       quantity: normalizedQuantity,
-      totalAmount: purchaseTotalAmount(purchaseType, normalizedQuantity),
+      totalAmount: Math.floor(normalizedQuantity / option.unit) * option.price,
       status: "PENDING",
     }),
   });
@@ -1336,7 +1345,7 @@ export default function MerchantDashboard() {
     const quantity = normalizePurchaseQuantity(purchaseType, purchaseInputs[purchaseType]);
 
     if (quantity <= 0) {
-      setError(`${option.step}장 단위로 구매 수량을 입력해 주세요.`);
+      setError(`${option.label} 수량을 1 이상 입력해 주세요.`);
       return;
     }
 
@@ -1351,7 +1360,7 @@ export default function MerchantDashboard() {
         unit: option.unit,
         unitPrice: option.price,
         quantity,
-        totalAmount: purchaseTotalAmount(purchaseType, quantity),
+        totalAmount: Math.floor(quantity / option.unit) * option.price,
         status: "PENDING",
         createdAt: nowIso(),
       };
@@ -2198,7 +2207,8 @@ export default function MerchantDashboard() {
             <div className="mt-3 grid gap-2">
               {PURCHASE_OPTIONS.map((option) => {
                 const quantity = normalizePurchaseQuantity(option.key, purchaseInputs[option.key]);
-                const totalAmount = purchaseTotalAmount(option.key, quantity);
+                const setCount = purchaseSetCount(option.key, purchaseInputs[option.key]);
+                const totalAmount = purchaseTotalAmount(option.key, purchaseInputs[option.key]);
 
                 return (
                   <div key={option.key} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
@@ -2209,15 +2219,16 @@ export default function MerchantDashboard() {
                       </div>
                       <input
                         type="number"
-                        min={option.step}
-                        step={option.step}
+                        min={1}
+                        step={1}
                         value={purchaseInputs[option.key]}
                         onChange={(e) => setPurchaseInputs((prev) => ({ ...prev, [option.key]: e.target.value }))}
-                        placeholder="수량"
+                        placeholder={option.inputLabel === "세트" ? "세트 수" : "수량"}
                         className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-300"
                       />
                       <div className="text-sm text-slate-700">
                         <div>단가: <span className="font-semibold">{formatCurrency(option.price)}</span> / {option.unit}장</div>
+                        <div>요청 수량: <span className="font-semibold">{setCount}{option.inputLabel}</span> = {quantity}장</div>
                         <div>총 비용: <span className="font-bold text-slate-950">{formatCurrency(totalAmount)}</span></div>
                       </div>
                       <button
