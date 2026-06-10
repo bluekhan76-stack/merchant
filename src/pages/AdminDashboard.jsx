@@ -56,6 +56,65 @@ function purchaseOptionLabel(type) {
   return PURCHASE_OPTIONS[type]?.label || type || "-";
 }
 
+function normalizePurchaseRequestItems(request) {
+  const sourceItems =
+    Array.isArray(request?.items) && request.items.length > 0
+      ? request.items
+      : Array.isArray(request?.purchaseItems) && request.purchaseItems.length > 0
+        ? request.purchaseItems
+        : Array.isArray(request?.details) && request.details.length > 0
+          ? request.details
+          : request?.purchaseType
+            ? [request]
+            : [];
+
+  return sourceItems
+    .map((row) => {
+      const purchaseType = row?.purchaseType || row?.type || row?.key || "";
+      const option = PURCHASE_OPTIONS[purchaseType] || {};
+      const unit = Number(row?.unit ?? option.unit ?? 1);
+      const unitPrice = Number(row?.unitPrice ?? row?.price ?? option.price ?? 0);
+      const quantity = Number(row?.quantity ?? row?.qty ?? 0);
+      const setCount = unit > 0 ? Math.floor(quantity / unit) : quantity;
+      const totalAmount = Number(
+        row?.totalAmount ??
+        row?.amount ??
+        (unit > 0 && unitPrice > 0 ? setCount * unitPrice : 0)
+      );
+
+      return {
+        ...row,
+        purchaseType,
+        label: row?.label || purchaseOptionLabel(purchaseType),
+        unit,
+        unitPrice,
+        quantity: Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 0,
+        setCount: Number.isFinite(setCount) && setCount > 0 ? Math.floor(setCount) : 0,
+        totalAmount: Number.isFinite(totalAmount) && totalAmount > 0 ? Math.floor(totalAmount) : 0,
+      };
+    })
+    .filter((row) => row.purchaseType && row.quantity > 0);
+}
+
+function getPurchaseRequestTotalQuantity(request) {
+  return normalizePurchaseRequestItems(request).reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+}
+
+function getPurchaseRequestTotalAmount(request) {
+  const explicitTotal = Number(request?.grandTotal ?? request?.totalAmount ?? request?.amount ?? 0);
+  if (Number.isFinite(explicitTotal) && explicitTotal > 0 && normalizePurchaseRequestItems(request).length <= 1) {
+    return Math.floor(explicitTotal);
+  }
+
+  const itemsTotal = normalizePurchaseRequestItems(request).reduce((sum, row) => sum + Number(row.totalAmount || 0), 0);
+  return itemsTotal > 0 ? itemsTotal : Math.max(Math.floor(explicitTotal || 0), 0);
+}
+
+function formatPurchaseItemLine(row) {
+  const setText = row.unit > 1 && row.setCount > 0 ? ` / ${row.setCount}세트` : "";
+  return `${row.label} / ${row.quantity}장${setText}`;
+}
+
 function getPurchaseRequests(item) {
   const requests = item?.purchaseRequests || item?.passPurchaseRequests || item?.ticketPurchaseRequests || [];
   return Array.isArray(requests) ? requests : [];
@@ -432,13 +491,19 @@ export default function AdminDashboard() {
   async function approvePurchaseRequest(item, request) {
     if (!item?.merchantId || !request) return;
 
-    const quantity = Number(request.quantity || 0);
-    if (!Number.isInteger(quantity) || quantity <= 0) {
+    const items = normalizePurchaseRequestItems(request);
+    const totalQuantity = getPurchaseRequestTotalQuantity(request);
+    const totalAmount = getPurchaseRequestTotalAmount(request);
+
+    if (items.length === 0 || !Number.isInteger(totalQuantity) || totalQuantity <= 0) {
       alert("승인할 구매 수량이 올바르지 않습니다.");
       return;
     }
 
-    const ok = window.confirm(`${merchantDisplayName(item)}의 ${purchaseOptionLabel(request.purchaseType)} ${quantity}장을 승인하시겠습니까?`);
+    const itemLines = items.map((row) => `- ${formatPurchaseItemLine(row)}`).join("\n");
+    const ok = window.confirm(
+      `${merchantDisplayName(item)}의 구매 요청을 승인하시겠습니까?\n\n${itemLines}\n\n총 수량: ${totalQuantity}장\n총 금액: ${formatCurrency(totalAmount)}`
+    );
     if (!ok) return;
 
     try {
@@ -448,9 +513,14 @@ export default function AdminDashboard() {
         method: "POST",
         body: JSON.stringify({
           requestId,
-          purchaseType: request.purchaseType,
-          quantity,
-          totalAmount: Number(request.totalAmount || 0),
+          items,
+          purchaseItems: items,
+          totalQuantity,
+          grandTotal: totalAmount,
+          totalAmount,
+          // 기존 단일 구매 요청 API와의 호환용 필드
+          purchaseType: items.length === 1 ? items[0].purchaseType : "mixed",
+          quantity: totalQuantity,
         }),
       });
       await loadData();
@@ -664,14 +734,21 @@ export default function AdminDashboard() {
                               <div key={request.requestId || request.id || index} className="rounded-xl bg-white p-2 text-xs">
                                 <div className="flex items-start justify-between gap-2">
                                   <div>
-                                    <div className="font-semibold text-slate-900">
-                                      {purchaseOptionLabel(request.purchaseType)} / {Number(request.quantity || 0)}장
+                                    <div className="space-y-1 font-semibold text-slate-900">
+                                      {normalizePurchaseRequestItems(request).map((row, rowIndex) => (
+                                        <div key={`${row.purchaseType}-${rowIndex}`}>
+                                          {formatPurchaseItemLine(row)}
+                                        </div>
+                                      ))}
                                     </div>
                                     <div className="mt-1 text-slate-500">
                                       요청일: {formatDate(request.createdAt || request.requestedAt)}
                                     </div>
                                     <div className="mt-1 text-slate-600">
-                                      금액: {formatCurrency(request.totalAmount || 0)}
+                                      총 수량: {getPurchaseRequestTotalQuantity(request)}장
+                                    </div>
+                                    <div className="mt-1 text-slate-600">
+                                      총 금액: {formatCurrency(getPurchaseRequestTotalAmount(request))}
                                     </div>
                                   </div>
                                   <button
@@ -760,7 +837,7 @@ export default function AdminDashboard() {
                       >
                         <div>
                           <div className="text-sm font-semibold text-slate-800">구매 히스토리</div>
-                          <div className="mt-1 text-xs text-slate-500">날짜별 요청한 구매단위와 수량을 확인합니다.</div>
+                          <div className="mt-1 text-xs text-slate-500">날짜별 요청한 구매단위, 수량, 총액을 확인합니다.</div>
                         </div>
                         <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
                           {expandedPurchaseHistoryId === item.merchantId ? "접기" : "펼치기"}
@@ -788,9 +865,15 @@ export default function AdminDashboard() {
                                 historyRows.map((row, index) => (
                                   <tr key={row.requestId || row.id || index} className="border-b last:border-0">
                                     <td className="py-2">{formatDate(row.createdAt || row.requestedAt || row.approvedAt)}</td>
-                                    <td>{purchaseOptionLabel(row.purchaseType)}</td>
-                                    <td className="text-right font-semibold">{Number(row.quantity || 0)}장</td>
-                                    <td className="text-right">{formatCurrency(row.totalAmount || 0)}</td>
+                                    <td>
+                                      <div className="space-y-1">
+                                        {normalizePurchaseRequestItems(row).map((itemRow, rowIndex) => (
+                                          <div key={`${itemRow.purchaseType}-${rowIndex}`}>{formatPurchaseItemLine(itemRow)}</div>
+                                        ))}
+                                      </div>
+                                    </td>
+                                    <td className="text-right font-semibold">{getPurchaseRequestTotalQuantity(row)}장</td>
+                                    <td className="text-right">{formatCurrency(getPurchaseRequestTotalAmount(row))}</td>
                                     <td className="text-right">{purchaseStatusLabel(row.status)}</td>
                                   </tr>
                                 ))

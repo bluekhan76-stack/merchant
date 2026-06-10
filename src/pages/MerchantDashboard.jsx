@@ -1383,11 +1383,12 @@ export default function MerchantDashboard() {
     }
   }
 
-  function handleSubmitSelectedPurchaseRequest() {
+  async function handleSubmitSelectedPurchaseRequest() {
     const selectedOptions = PURCHASE_OPTIONS
       .map((option) => ({
         option,
         quantity: normalizePurchaseQuantity(option.key, purchaseInputs[option.key]),
+        totalAmount: purchaseTotalAmount(option.key, purchaseInputs[option.key]),
       }))
       .filter((item) => item.quantity > 0);
 
@@ -1396,12 +1397,53 @@ export default function MerchantDashboard() {
       return;
     }
 
-    if (selectedOptions.length > 1) {
-      setError("한 번에 한 가지 구매 단위만 결제할 수 있습니다. 결제할 항목 하나만 수량을 입력해 주세요.");
-      return;
-    }
+    setError("");
+    setPurchaseBusy(true);
 
-    handleSubmitPurchaseRequest(selectedOptions[0].option.key);
+    try {
+      const createdRequests = [];
+
+      for (const item of selectedOptions) {
+        const result = await submitPurchaseRequest({
+          purchaseType: item.option.key,
+          quantity: item.quantity,
+        });
+
+        createdRequests.push(
+          result.request || result.item || {
+            requestId: safeUuid(),
+            purchaseType: item.option.key,
+            label: item.option.label,
+            unit: item.option.unit,
+            unitPrice: item.option.price,
+            quantity: item.quantity,
+            totalAmount: item.totalAmount,
+            status: "PENDING",
+            createdAt: nowIso(),
+          }
+        );
+      }
+
+      setMerchant((prev) => {
+        const nextMerchant = {
+          ...prev,
+          purchaseRequests: [
+            ...createdRequests,
+            ...(Array.isArray(prev.purchaseRequests) ? prev.purchaseRequests : []),
+          ],
+        };
+        localStorage.setItem(STORAGE_KEYS.merchant, JSON.stringify(nextMerchant));
+        return nextMerchant;
+      });
+
+      setPurchaseInputs({ single: "", bundle50: "", bundle100: "" });
+      setPurchaseModalOpen(true);
+      setToast("결제 요청이 등록되었습니다. 관리자 승인 후 사용할 수 있습니다.");
+    } catch (err) {
+      setError(err?.message || "결제 요청 중 오류가 발생했습니다.");
+    } finally {
+      setPurchaseBusy(false);
+    }
   }
 
   function handleIssueQrPass() {
@@ -1630,6 +1672,25 @@ export default function MerchantDashboard() {
     { label: "오늘 발행", value: `${todayIssued}건` },
     { label: "승인 대기 구매", value: `${pendingPurchaseRequests.length}건` },
   ];
+
+  const purchaseSummaryRows = useMemo(() => {
+    return PURCHASE_OPTIONS.map((option) => {
+      const quantity = normalizePurchaseQuantity(option.key, purchaseInputs[option.key]);
+      const setCount = purchaseSetCount(option.key, purchaseInputs[option.key]);
+      const totalAmount = purchaseTotalAmount(option.key, purchaseInputs[option.key]);
+
+      return {
+        ...option,
+        quantity,
+        setCount,
+        totalAmount,
+      };
+    });
+  }, [purchaseInputs]);
+
+  const purchaseGrandTotal = useMemo(() => {
+    return purchaseSummaryRows.reduce((sum, item) => sum + item.totalAmount, 0);
+  }, [purchaseSummaryRows]);
 
 
   return (
@@ -2247,6 +2308,29 @@ export default function MerchantDashboard() {
                   </div>
                 );
               })}
+            </div>
+
+            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+              <div className="mb-2 text-sm font-bold text-slate-900">결제 금액 합계</div>
+              <div className="space-y-1 text-sm text-slate-700">
+                {purchaseSummaryRows.map((item) => (
+                  <div key={item.key} className="flex items-center justify-between gap-3">
+                    <span>
+                      {item.label}
+                      {item.quantity > 0 ? (
+                        <span className="ml-1 text-xs text-slate-500">
+                          ({item.setCount}{item.inputLabel} / {item.quantity}장)
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="font-semibold text-slate-900">{formatCurrency(item.totalAmount)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3">
+                <span className="text-sm font-bold text-slate-900">총 결제 금액</span>
+                <span className="text-lg font-black text-slate-950">{formatCurrency(purchaseGrandTotal)}</span>
+              </div>
             </div>
 
             <button
