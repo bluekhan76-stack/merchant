@@ -1375,12 +1375,33 @@ export default function MerchantDashboard() {
       });
       setPurchaseInputs((prev) => ({ ...prev, [purchaseType]: "" }));
       setPurchaseModalOpen(true);
-      setToast("구매 요청이 등록되었습니다. 관리자 승인 후 사용할 수 있습니다.");
+      setToast("결제 요청이 등록되었습니다. 관리자 승인 후 사용할 수 있습니다.");
     } catch (err) {
-      setError(err?.message || "구매 요청 중 오류가 발생했습니다.");
+      setError(err?.message || "결제 요청 중 오류가 발생했습니다.");
     } finally {
       setPurchaseBusy(false);
     }
+  }
+
+  function handleSubmitSelectedPurchaseRequest() {
+    const selectedOptions = PURCHASE_OPTIONS
+      .map((option) => ({
+        option,
+        quantity: normalizePurchaseQuantity(option.key, purchaseInputs[option.key]),
+      }))
+      .filter((item) => item.quantity > 0);
+
+    if (selectedOptions.length === 0) {
+      setError("결제할 구매 수량을 1개 이상 입력해 주세요.");
+      return;
+    }
+
+    if (selectedOptions.length > 1) {
+      setError("한 번에 한 가지 구매 단위만 결제할 수 있습니다. 결제할 항목 하나만 수량을 입력해 주세요.");
+      return;
+    }
+
+    handleSubmitPurchaseRequest(selectedOptions[0].option.key);
   }
 
   function handleIssueQrPass() {
@@ -2033,7 +2054,7 @@ export default function MerchantDashboard() {
           >
             계좌번호 복사
           </button>
-          <p className="text-xs leading-relaxed text-slate-500">입금 후 관리자가 구매 요청을 승인하면 해당 수량이 사용 가능 주차권에 반영됩니다.</p>
+          <p className="text-xs leading-relaxed text-slate-500">입금 후 관리자가 결제 요청을 승인하면 해당 수량이 사용 가능 주차권에 반영됩니다.</p>
         </div>
       </Modal>
 
@@ -2190,18 +2211,9 @@ export default function MerchantDashboard() {
           </div>
 
           <div className="mt-3 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 sm:p-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-base font-semibold sm:text-lg">정액제 주차권 구매 요청</h2>
-                <p className="mt-1 text-xs text-slate-500">요청한 수량은 관리자가 승인한 후 사용 가능 주차권에 반영됩니다.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPurchaseModalOpen(true)}
-                className="rounded-xl border px-3 py-2 text-xs font-semibold hover:bg-slate-50"
-              >
-                결제 안내
-              </button>
+            <div>
+              <h2 className="text-base font-semibold sm:text-lg">정액제 주차권 구매</h2>
+              <p className="mt-1 text-xs text-slate-500">결제한 수량은 관리자가 승인한 후 사용 가능 주차권에 반영됩니다.</p>
             </div>
 
             <div className="mt-3 grid gap-2">
@@ -2212,7 +2224,7 @@ export default function MerchantDashboard() {
 
                 return (
                   <div key={option.key} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="grid gap-2 sm:grid-cols-[1fr_140px_1fr_auto] sm:items-center">
+                    <div className="grid gap-2 sm:grid-cols-[1fr_140px_1fr] sm:items-center">
                       <div>
                         <div className="font-semibold text-slate-900">{option.label}</div>
                         <div className="mt-1 text-xs text-slate-500">{option.helper}</div>
@@ -2228,22 +2240,23 @@ export default function MerchantDashboard() {
                       />
                       <div className="text-sm text-slate-700">
                         <div>단가: <span className="font-semibold">{formatCurrency(option.price)}</span> / {option.unit}장</div>
-                        <div>요청 수량: <span className="font-semibold">{setCount}{option.inputLabel}</span> = {quantity}장</div>
+                        <div>결제 수량: <span className="font-semibold">{setCount}{option.inputLabel}</span> = {quantity}장</div>
                         <div>총 비용: <span className="font-bold text-slate-950">{formatCurrency(totalAmount)}</span></div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleSubmitPurchaseRequest(option.key)}
-                        disabled={purchaseBusy || quantity <= 0}
-                        className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        요청
-                      </button>
                     </div>
                   </div>
                 );
               })}
             </div>
+
+            <button
+              type="button"
+              onClick={handleSubmitSelectedPurchaseRequest}
+              disabled={purchaseBusy}
+              className="mt-3 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {purchaseBusy ? "결제 요청 중..." : "결제"}
+            </button>
           </div>
 
           {showHistoryPanel ? (
