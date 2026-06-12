@@ -8,7 +8,7 @@ const API_BASE = "https://8q72reoak2.execute-api.ap-northeast-2.amazonaws.com";
 const PURCHASE_OPTIONS = {
   single: { label: "1장 구매", unit: 1, price: 1000 },
   bundle50: { label: "50장 구매", unit: 50, price: 20000 },
-  bundle100: { label: "100장 구매", unit: 100, price: 15000 },
+  bundle200: { label: "200장 구매", unit: 200, price: 30000 },
 };
 
 function formatDate(value) {

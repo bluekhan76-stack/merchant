@@ -22,7 +22,7 @@ const API_PATHS = {
 const PURCHASE_OPTIONS = [
   { key: "single", label: "1장 구매", unit: 1, price: 1000, step: 1, helper: "수량 1 입력 = 1장", inputLabel: "장" },
   { key: "bundle50", label: "50장 구매", unit: 50, price: 20000, step: 1, helper: "수량 1 입력 = 50장 1세트", inputLabel: "세트" },
-  { key: "bundle100", label: "100장 구매", unit: 100, price: 15000, step: 1, helper: "수량 1 입력 = 100장 1세트", inputLabel: "세트" },
+  { key: "bundle200", label: "200장 구매", unit: 200, price: 30000, step: 1, helper: "수량 1 입력 = 200장 1세트", inputLabel: "세트" },
 ];
 
 const DEPOSIT_BANK_TEXT = "신한은행 : xxx-xx-xxxxxx (예금주 : 파킹크루즈)";
@@ -786,7 +786,7 @@ export default function MerchantDashboard() {
   const [favoriteModalOpen, setFavoriteModalOpen] = useState(false);
   const [issuedInvite, setIssuedInvite] = useState(null);
   const [inviteResultModalOpen, setInviteResultModalOpen] = useState(false);
-  const [purchaseInputs, setPurchaseInputs] = useState(() => ({ single: "", bundle50: "", bundle100: "" }));
+  const [purchaseInputs, setPurchaseInputs] = useState(() => ({ single: "", bundle50: "", bundle200: "" }));
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [purchaseBusy, setPurchaseBusy] = useState(false);
 
@@ -951,6 +951,21 @@ export default function MerchantDashboard() {
         ? apiTodayIssuedCount
         : getServerTodayIssuedCount(prev) + Number(fallbackIncrement || 1);
 
+      const fallbackUseCount = Math.max(Number(fallbackIncrement || 1), 1);
+      const apiAvailablePasses = Number(
+        result?.merchantAvailablePasses ??
+        result?.availablePasses ??
+        result?.merchantRemainingPasses ??
+        result?.remainingPasses
+      );
+      const prevAvailablePasses = getAvailablePasses(prev);
+      const isUnlimitedOrPayg = nextMonthlyQuota === -1 || nextPlanType === "payg";
+      const nextAvailablePasses = isUnlimitedOrPayg
+        ? prevAvailablePasses
+        : Number.isFinite(apiAvailablePasses)
+          ? Math.max(Math.floor(apiAvailablePasses), 0)
+          : Math.max(prevAvailablePasses - fallbackUseCount, 0);
+
       const nextMerchant = {
         ...prev,
         usedCount: nextUsedCount,
@@ -958,6 +973,8 @@ export default function MerchantDashboard() {
         unitPrice: Number.isFinite(nextUnitPrice) ? nextUnitPrice : 0,
         estimatedAmount: nextPlanType === "payg" ? nextUsedCount * (Number.isFinite(nextUnitPrice) ? nextUnitPrice : 0) : 0,
         additionalPasses: nextPlanType === "payg" ? 0 : nextAdditionalPasses,
+        availablePasses: nextAvailablePasses,
+        remainingPasses: nextAvailablePasses,
         monthlyQuota: nextMonthlyQuota,
         planLimit: nextMonthlyQuota,
         totalLimit: nextMonthlyQuota === -1 || nextPlanType === "payg" ? -1 : nextMonthlyQuota + nextAdditionalPasses,
@@ -1436,7 +1453,7 @@ export default function MerchantDashboard() {
         return nextMerchant;
       });
 
-      setPurchaseInputs({ single: "", bundle50: "", bundle100: "" });
+      setPurchaseInputs({ single: "", bundle50: "", bundle200: "" });
       setPurchaseModalOpen(true);
       setToast("결제 요청이 등록되었습니다. 관리자 승인 후 사용할 수 있습니다.");
     } catch (err) {
