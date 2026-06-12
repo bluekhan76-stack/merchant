@@ -1704,6 +1704,7 @@ export default function MerchantDashboard() {
   }
 
   const availablePassesValue = getAvailablePasses(merchant);
+  const availablePassesDisplay = isUnlimitedPlan ? "무제한" : `${availablePassesValue}장`;
   const pendingPurchaseRequests = useMemo(() => {
     return Array.isArray(merchant.purchaseRequests)
       ? merchant.purchaseRequests.filter((item) => String(item?.status || "PENDING").toUpperCase() === "PENDING")
@@ -1711,7 +1712,7 @@ export default function MerchantDashboard() {
   }, [merchant.purchaseRequests]);
 
   const stats = [
-    { label: "사용 가능 주차권", value: `${availablePassesValue}장` },
+    { label: "사용 가능 주차권", value: availablePassesDisplay },
     { label: "오늘 발행", value: `${todayIssued}건` },
     { label: "승인 대기 구매", value: `${pendingPurchaseRequests.length}건` },
   ];
@@ -2175,7 +2176,7 @@ export default function MerchantDashboard() {
 
               <div className="flex shrink-0 items-center gap-2">
                 <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                  사용 가능 {availablePassesValue}장
+                  사용 가능 {availablePassesDisplay}
                 </span>
               </div>
             </div>
@@ -2505,7 +2506,7 @@ export default function MerchantDashboard() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">사용 가능 주차권</span>
-                <span className="font-medium">{availablePassesValue}장</span>
+                <span className="font-medium">{availablePassesDisplay}</span>
               </div>
             </div>
           </div>
