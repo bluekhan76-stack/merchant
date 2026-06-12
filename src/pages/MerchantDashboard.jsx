@@ -54,15 +54,41 @@ function purchaseSetCount(key, quantity) {
 }
 
 function getAvailablePasses(merchant) {
-  const candidates = [
+  const planType = String(merchant?.planType || "").toLowerCase() === "payg" ||
+    String(merchant?.planLimit || "").toLowerCase() === "payg"
+    ? "payg"
+    : "subscription";
+
+  if (planType === "payg") return 0;
+
+  const rawPlanLimit = merchant?.monthlyQuota ?? merchant?.planLimit;
+  const planLimit = rawPlanLimit === "unlimited" ? -1 : Number(rawPlanLimit ?? 0);
+
+  if (planLimit === -1) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const additionalPasses = Number(merchant?.additionalPasses || 0);
+  const usedCount = Number(merchant?.usedCount || 0);
+
+  if (Number.isFinite(planLimit) && planLimit >= 0) {
+    return Math.max(
+      Math.floor(planLimit) +
+        (Number.isFinite(additionalPasses) ? Math.floor(additionalPasses) : 0) -
+        (Number.isFinite(usedCount) ? Math.floor(usedCount) : 0),
+      0
+    );
+  }
+
+  const fallbackCandidates = [
+    merchant?.remainingPasses,
     merchant?.availablePasses,
     merchant?.approvedPasses,
     merchant?.purchasedPasses,
-    merchant?.remainingPasses,
     merchant?.additionalPasses,
   ];
 
-  for (const value of candidates) {
+  for (const value of fallbackCandidates) {
     const n = Number(value);
     if (Number.isFinite(n) && n >= 0) return Math.floor(n);
   }
@@ -952,19 +978,19 @@ export default function MerchantDashboard() {
         : getServerTodayIssuedCount(prev) + Number(fallbackIncrement || 1);
 
       const fallbackUseCount = Math.max(Number(fallbackIncrement || 1), 1);
-      const apiAvailablePasses = Number(
-        result?.merchantAvailablePasses ??
-        result?.availablePasses ??
-        result?.merchantRemainingPasses ??
-        result?.remainingPasses
-      );
       const prevAvailablePasses = getAvailablePasses(prev);
       const isUnlimitedOrPayg = nextMonthlyQuota === -1 || nextPlanType === "payg";
+      const calculatedAvailablePasses = !isUnlimitedOrPayg && Number.isFinite(nextMonthlyQuota)
+        ? Math.max(
+            Math.floor(nextMonthlyQuota) +
+              (Number.isFinite(nextAdditionalPasses) ? Math.floor(nextAdditionalPasses) : 0) -
+              (Number.isFinite(nextUsedCount) ? Math.floor(nextUsedCount) : 0),
+            0
+          )
+        : prevAvailablePasses;
       const nextAvailablePasses = isUnlimitedOrPayg
         ? prevAvailablePasses
-        : Number.isFinite(apiAvailablePasses)
-          ? Math.max(Math.floor(apiAvailablePasses), 0)
-          : Math.max(prevAvailablePasses - fallbackUseCount, 0);
+        : calculatedAvailablePasses;
 
       const nextMerchant = {
         ...prev,
