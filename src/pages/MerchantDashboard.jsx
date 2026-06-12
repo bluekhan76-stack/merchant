@@ -54,41 +54,17 @@ function purchaseSetCount(key, quantity) {
 }
 
 function getAvailablePasses(merchant) {
-  const planType = String(merchant?.planType || "").toLowerCase() === "payg" ||
-    String(merchant?.planLimit || "").toLowerCase() === "payg"
-    ? "payg"
-    : "subscription";
-
-  if (planType === "payg") return 0;
-
-  const rawPlanLimit = merchant?.monthlyQuota ?? merchant?.planLimit;
-  const planLimit = rawPlanLimit === "unlimited" ? -1 : Number(rawPlanLimit ?? 0);
-
-  if (planLimit === -1) {
-    return Number.MAX_SAFE_INTEGER;
-  }
-
-  const additionalPasses = Number(merchant?.additionalPasses || 0);
-  const usedCount = Number(merchant?.usedCount || 0);
-
-  if (Number.isFinite(planLimit) && planLimit >= 0) {
-    return Math.max(
-      Math.floor(planLimit) +
-        (Number.isFinite(additionalPasses) ? Math.floor(additionalPasses) : 0) -
-        (Number.isFinite(usedCount) ? Math.floor(usedCount) : 0),
-      0
-    );
-  }
-
-  const fallbackCandidates = [
-    merchant?.remainingPasses,
+  // 관리자 페이지와 동일하게 서버가 내려준 사용 가능 주차권 값을 우선 표시한다.
+  // 월 한도 + 추가 주차권 - 사용량을 프론트에서 다시 계산하면 관리자 페이지와 수량이 달라질 수 있다.
+  const candidates = [
     merchant?.availablePasses,
     merchant?.approvedPasses,
     merchant?.purchasedPasses,
+    merchant?.remainingPasses,
     merchant?.additionalPasses,
   ];
 
-  for (const value of fallbackCandidates) {
+  for (const value of candidates) {
     const n = Number(value);
     if (Number.isFinite(n) && n >= 0) return Math.floor(n);
   }
@@ -897,7 +873,6 @@ export default function MerchantDashboard() {
   }, [merchant]);
 
   const isPayAsYouGo = isPayAsYouGoPlan(merchant);
-  const isUnlimitedPlan = !isPayAsYouGo && merchant.monthlyQuota === -1;
   const unitPrice = getUnitPrice(merchant);
 
   const billingCycle = useMemo(() => getBillingCycle(merchant), [merchant]);
@@ -979,18 +954,16 @@ export default function MerchantDashboard() {
 
       const fallbackUseCount = Math.max(Number(fallbackIncrement || 1), 1);
       const prevAvailablePasses = getAvailablePasses(prev);
-      const isUnlimitedOrPayg = nextMonthlyQuota === -1 || nextPlanType === "payg";
-      const calculatedAvailablePasses = !isUnlimitedOrPayg && Number.isFinite(nextMonthlyQuota)
-        ? Math.max(
-            Math.floor(nextMonthlyQuota) +
-              (Number.isFinite(nextAdditionalPasses) ? Math.floor(nextAdditionalPasses) : 0) -
-              (Number.isFinite(nextUsedCount) ? Math.floor(nextUsedCount) : 0),
-            0
-          )
-        : prevAvailablePasses;
-      const nextAvailablePasses = isUnlimitedOrPayg
-        ? prevAvailablePasses
-        : calculatedAvailablePasses;
+      const apiAvailablePasses = Number(
+        result?.merchantAvailablePasses ??
+          result?.merchantRemainingPasses ??
+          result?.availablePasses ??
+          result?.remainingPasses
+      );
+      const nextAvailablePasses =
+        Number.isFinite(apiAvailablePasses) && apiAvailablePasses >= 0
+          ? Math.floor(apiAvailablePasses)
+          : Math.max(prevAvailablePasses - fallbackUseCount, 0);
 
       const nextMerchant = {
         ...prev,
@@ -1704,7 +1677,7 @@ export default function MerchantDashboard() {
   }
 
   const availablePassesValue = getAvailablePasses(merchant);
-  const availablePassesDisplay = isUnlimitedPlan ? "무제한" : `${availablePassesValue}장`;
+  const availablePassesDisplay = `${availablePassesValue}장`;
   const pendingPurchaseRequests = useMemo(() => {
     return Array.isArray(merchant.purchaseRequests)
       ? merchant.purchaseRequests.filter((item) => String(item?.status || "PENDING").toUpperCase() === "PENDING")
