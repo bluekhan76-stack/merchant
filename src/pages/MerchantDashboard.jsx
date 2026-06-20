@@ -22,7 +22,7 @@ const API_PATHS = {
 const PURCHASE_OPTIONS = [
   { key: "single", label: "1장 구매", unit: 1, price: 1000, step: 1, helper: "수량 1 입력 = 1장", inputLabel: "장" },
   { key: "bundle50", label: "50장 구매", unit: 50, price: 20000, step: 1, helper: "수량 1 입력 = 50장 1세트", inputLabel: "세트" },
-  { key: "bundle200", label: "200장 구매", unit: 200, price: 30000, step: 1, helper: "수량 1 입력 = 200장 1세트", inputLabel: "세트" },
+  { key: "bundle100", label: "100장 구매", unit: 100, price: 15000, step: 1, helper: "수량 1 입력 = 100장 1세트", inputLabel: "세트" },
 ];
 
 const DEPOSIT_BANK_TEXT = "신한은행 : xxx-xx-xxxxxx (예금주 : 파킹크루즈)";
@@ -54,8 +54,6 @@ function purchaseSetCount(key, quantity) {
 }
 
 function getAvailablePasses(merchant) {
-  // 관리자 페이지와 동일하게 서버가 내려준 사용 가능 주차권 값을 우선 표시한다.
-  // 월 한도 + 추가 주차권 - 사용량을 프론트에서 다시 계산하면 관리자 페이지와 수량이 달라질 수 있다.
   const candidates = [
     merchant?.availablePasses,
     merchant?.approvedPasses,
@@ -451,6 +449,16 @@ function deepLinkFor(phone, inviteId, inviteCode) {
   return url.toString();
 }
 
+function visitorClaimLinkFor(inviteId, inviteCode) {
+  const inviteKey = inviteCode || inviteId || "";
+  // 고정 QR 옵션용 링크입니다.
+  // QR 스캔만으로는 차감하지 않고, 방문자 페이지에서 [주차권 사용하기] 버튼을 눌렀을 때만 차감 API를 호출합니다.
+  const url = new URL(window.location.origin);
+  url.searchParams.set("code", inviteKey);
+  url.searchParams.set("claim", "1");
+  return url.toString();
+}
+
 function statusTone(status) {
   if (status === "앱 수신") return "bg-emerald-50 text-emerald-700";
   if (status === "만료") return "bg-rose-50 text-rose-700";
@@ -619,6 +627,7 @@ async function requestParkingPass({
   ticketValidUntil,
   issueMethod,
   deliveryMethod,
+  deferUsageDeduction = false,
   merchantShopName,
   merchantOwnerName,
   merchantPhone,
@@ -646,6 +655,7 @@ async function requestParkingPass({
       ticketValidUntil,
       issueMethod: issueMethod || undefined,
       deliveryMethod: deliveryMethod || undefined,
+      deferUsageDeduction: Boolean(deferUsageDeduction),
       merchantShopName: merchantShopName || undefined,
       merchantOwnerName: merchantOwnerName || undefined,
       merchantPhone: merchantPhone || undefined,
@@ -669,8 +679,10 @@ async function requestParkingPass({
 async function submitPurchaseRequest({ purchaseType, quantity }) {
   const option = getPurchaseOption(purchaseType);
   const normalizedQuantity = Number(quantity || 0);
+  const setCount = normalizedQuantity > 0 ? Math.floor(normalizedQuantity / option.unit) : 0;
+  const totalAmount = setCount * option.price;
 
-  if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+  if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0 || setCount <= 0) {
     throw new Error(`${option.label} 수량을 1 이상 입력해 주세요.`);
   }
 
@@ -686,8 +698,21 @@ async function submitPurchaseRequest({ purchaseType, quantity }) {
       label: option.label,
       unit: option.unit,
       unitPrice: option.price,
+
+      // 서버 API 버전별 필드명이 달라도 수량을 인식할 수 있도록 함께 전달합니다.
+      // quantity/passCount/totalTickets = 실제 추가될 주차권 장수
       quantity: normalizedQuantity,
-      totalAmount: Math.floor(normalizedQuantity / option.unit) * option.price,
+      passCount: normalizedQuantity,
+      totalTickets: normalizedQuantity,
+      requestedQuantity: normalizedQuantity,
+      purchaseQuantity: normalizedQuantity,
+
+      // setCount/purchaseCount = 구매 세트 수
+      setCount,
+      purchaseCount: setCount,
+      count: setCount,
+
+      totalAmount,
       status: "PENDING",
     }),
   });
@@ -717,6 +742,7 @@ async function requestQrParkingPass({
   ticketValidFrom,
   ticketValidUntil,
   merchant,
+  deferUsageDeduction = false,
 }) {
   return requestParkingPass({
     phone: "",
@@ -732,6 +758,7 @@ async function requestQrParkingPass({
     ticketValidUntil,
     issueMethod: "qr",
     deliveryMethod: "qr",
+    deferUsageDeduction,
     merchantShopName: merchant?.shopName || "",
     merchantOwnerName: merchant?.ownerName || "",
     merchantPhone: merchant?.phone || "",
@@ -782,13 +809,14 @@ export default function MerchantDashboard() {
   const [qrTicket, setQrTicket] = useState(null);
   const [qrTicketUsed, setQrTicketUsed] = useState(false);
   const [qrBusy, setQrBusy] = useState(false);
+  const [fixedQrMode, setFixedQrMode] = useState(false);
   const [qrModalNotice, setQrModalNotice] = useState("");
   const [favorites, setFavorites] = useState([]);
   const [favoriteName, setFavoriteName] = useState("");
   const [favoriteModalOpen, setFavoriteModalOpen] = useState(false);
   const [issuedInvite, setIssuedInvite] = useState(null);
   const [inviteResultModalOpen, setInviteResultModalOpen] = useState(false);
-  const [purchaseInputs, setPurchaseInputs] = useState(() => ({ single: "", bundle50: "", bundle200: "" }));
+  const [purchaseInputs, setPurchaseInputs] = useState(() => ({ single: "", bundle50: "", bundle100: "" }));
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [purchaseBusy, setPurchaseBusy] = useState(false);
 
@@ -873,6 +901,7 @@ export default function MerchantDashboard() {
   }, [merchant]);
 
   const isPayAsYouGo = isPayAsYouGoPlan(merchant);
+  const isUnlimitedPlan = !isPayAsYouGo && merchant.monthlyQuota === -1;
   const unitPrice = getUnitPrice(merchant);
 
   const billingCycle = useMemo(() => getBillingCycle(merchant), [merchant]);
@@ -952,19 +981,6 @@ export default function MerchantDashboard() {
         ? apiTodayIssuedCount
         : getServerTodayIssuedCount(prev) + Number(fallbackIncrement || 1);
 
-      const fallbackUseCount = Math.max(Number(fallbackIncrement || 1), 1);
-      const prevAvailablePasses = getAvailablePasses(prev);
-      const apiAvailablePasses = Number(
-        result?.merchantAvailablePasses ??
-          result?.merchantRemainingPasses ??
-          result?.availablePasses ??
-          result?.remainingPasses
-      );
-      const nextAvailablePasses =
-        Number.isFinite(apiAvailablePasses) && apiAvailablePasses >= 0
-          ? Math.floor(apiAvailablePasses)
-          : Math.max(prevAvailablePasses - fallbackUseCount, 0);
-
       const nextMerchant = {
         ...prev,
         usedCount: nextUsedCount,
@@ -972,8 +988,6 @@ export default function MerchantDashboard() {
         unitPrice: Number.isFinite(nextUnitPrice) ? nextUnitPrice : 0,
         estimatedAmount: nextPlanType === "payg" ? nextUsedCount * (Number.isFinite(nextUnitPrice) ? nextUnitPrice : 0) : 0,
         additionalPasses: nextPlanType === "payg" ? 0 : nextAdditionalPasses,
-        availablePasses: nextAvailablePasses,
-        remainingPasses: nextAvailablePasses,
         monthlyQuota: nextMonthlyQuota,
         planLimit: nextMonthlyQuota,
         totalLimit: nextMonthlyQuota === -1 || nextPlanType === "payg" ? -1 : nextMonthlyQuota + nextAdditionalPasses,
@@ -1452,7 +1466,7 @@ export default function MerchantDashboard() {
         return nextMerchant;
       });
 
-      setPurchaseInputs({ single: "", bundle50: "", bundle200: "" });
+      setPurchaseInputs({ single: "", bundle50: "", bundle100: "" });
       setPurchaseModalOpen(true);
       setToast("결제 요청이 등록되었습니다. 관리자 승인 후 사용할 수 있습니다.");
     } catch (err) {
@@ -1488,7 +1502,7 @@ export default function MerchantDashboard() {
       return;
     }
 
-    if (!isPayAsYouGo && remainingPasses <= 0) {
+    if (!fixedQrMode && !isPayAsYouGo && remainingPasses <= 0) {
       setQrTicket(null);
       setPendingQrPass(null);
       setQrTicketUsed(false);
@@ -1520,8 +1534,10 @@ export default function MerchantDashboard() {
     const nextPendingQrPass = {
       ...buildPendingPass({ form: nextForm, merchant, invites }),
       visitorName: form.visitorName.trim() || "QR 방문자",
-      phone: "QR 스캔 발급",
+      phone: fixedQrMode ? "고정 QR 스캔 발급" : "QR 스캔 발급",
       issueMethod: "qr",
+      fixedQrMode,
+      deferUsageDeduction: fixedQrMode,
     };
 
     setPendingQrPass(nextPendingQrPass);
@@ -1556,9 +1572,10 @@ export default function MerchantDashboard() {
       Array.isArray(qrPass.parkingGates) && qrPass.parkingGates.length > 0
         ? qrPass.parkingGates
         : parkingGatesFromIds(selectedGateIds, merchant.parkingGates);
+    const isDeferredQr = Boolean(qrPass.deferUsageDeduction || qrPass.fixedQrMode || fixedQrMode);
 
     setQrBusy(true);
-    setApiStatus("서버에 QR 주차권 등록 요청 중입니다...");
+    setApiStatus(isDeferredQr ? "서버에 고정 QR 등록 요청 중입니다..." : "서버에 QR 주차권 등록 요청 중입니다...");
 
     try {
       const result = await requestQrParkingPass({
@@ -1572,11 +1589,14 @@ export default function MerchantDashboard() {
         ticketValidFrom: validFrom.toISOString(),
         ticketValidUntil: validUntil.toISOString(),
         merchant,
+        deferUsageDeduction: isDeferredQr,
       });
 
       const inviteId = result.inviteId || result.requestId || result.id || safeUuid();
       const inviteCode = result.inviteCode || result.code || inviteId;
-      const inviteUrl = deepLinkFor("", inviteId, inviteCode);
+      const inviteUrl = isDeferredQr
+        ? visitorClaimLinkFor(inviteId, inviteCode)
+        : deepLinkFor("", inviteId, inviteCode);
 
       const { history, visitCount, ...newQrPass } = qrPass;
       const newQrInvite = sanitizeInvite({
@@ -1585,7 +1605,7 @@ export default function MerchantDashboard() {
         inviteId,
         inviteCode,
         visitorName: qrPass.visitorName || "QR 방문자",
-        phone: "QR 스캔 발급",
+        phone: isDeferredQr ? "고정 QR 스캔 발급" : "QR 스캔 발급",
         shopName: merchant.shopName,
         parkingGateIds: selectedGateIds,
         parkingGateNames: selectedGateNames,
@@ -1595,14 +1615,18 @@ export default function MerchantDashboard() {
         ticketValidFrom: validFrom.toISOString(),
         ticketValidUntil: validUntil.toISOString(),
         usageLimit: Number(qrPass.usageLimit || 1),
-        status: "발행 완료",
+        status: isDeferredQr ? "사용 대기" : "발행 완료",
         issueMethod: "qr",
+        fixedQrMode: isDeferredQr,
+        deferUsageDeduction: isDeferredQr,
         createdAt: nowIso(),
         serverSynced: true,
         serverInviteUrl: inviteUrl,
       });
 
-      updateMerchantUsageFromApi(result, Number(newQrInvite.usageLimit || 1));
+      if (!isDeferredQr) {
+        updateMerchantUsageFromApi(result, Number(newQrInvite.usageLimit || 1));
+      }
       persistInvites([newQrInvite, ...invites]);
       setQrTicket({
         ...newQrInvite,
@@ -1613,7 +1637,7 @@ export default function MerchantDashboard() {
       setQrConfirmModalOpen(false);
       setPendingQrPass(null);
       setQrModalNotice("");
-      setToast("QR 주차권이 서버에 등록되었습니다.");
+      setToast(isDeferredQr ? "고정 QR이 등록되었습니다. 방문자가 사용하기를 눌렀을 때 차감됩니다." : "QR 주차권이 서버에 등록되었습니다.");
       setApiStatus("");
       resetForm();
     } catch (err) {
@@ -1677,7 +1701,6 @@ export default function MerchantDashboard() {
   }
 
   const availablePassesValue = getAvailablePasses(merchant);
-  const availablePassesDisplay = `${availablePassesValue}장`;
   const pendingPurchaseRequests = useMemo(() => {
     return Array.isArray(merchant.purchaseRequests)
       ? merchant.purchaseRequests.filter((item) => String(item?.status || "PENDING").toUpperCase() === "PENDING")
@@ -1685,7 +1708,7 @@ export default function MerchantDashboard() {
   }, [merchant.purchaseRequests]);
 
   const stats = [
-    { label: "사용 가능 주차권", value: availablePassesDisplay },
+    { label: "사용 가능 주차권", value: `${availablePassesValue}장` },
     { label: "오늘 발행", value: `${todayIssued}건` },
     { label: "승인 대기 구매", value: `${pendingPurchaseRequests.length}건` },
   ];
@@ -1909,7 +1932,7 @@ export default function MerchantDashboard() {
 
       <Modal
         open={qrModalOpen}
-        title="QR 주차권 코드 발행"
+        title={qrTicket?.deferUsageDeduction || qrTicket?.fixedQrMode ? "고정 QR 등록" : "QR 주차권 코드 발행"}
         onClose={() => {
           setQrModalOpen(false);
           setQrModalNotice("");
@@ -1933,7 +1956,7 @@ export default function MerchantDashboard() {
               <div className="rounded-2xl bg-slate-50 p-3 text-sm">
                 <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
                   <p><span className="font-medium text-slate-700">방문자명:</span> {qrTicket.visitorName}</p>
-                  <p><span className="font-medium text-slate-700">상태:</span> 서버 등록 완료</p>
+                  <p><span className="font-medium text-slate-700">상태:</span> {qrTicket.deferUsageDeduction || qrTicket.fixedQrMode ? "사용 대기" : "서버 등록 완료"}</p>
                   <p><span className="font-medium text-slate-700">대상 차단기:</span> {qrTicket.parkingGateNames.join(", ")}</p>
                   <p><span className="font-medium text-slate-700">유효시간:</span> {displayDuration(qrTicket.durationMinutes)}</p>
                 </div>
@@ -1984,7 +2007,9 @@ export default function MerchantDashboard() {
                     />
                   )}
                   <p className="text-center text-xs leading-relaxed text-slate-500">
-                    방문자 폰으로 스캔하면 서버에 등록된 실제 주차권 코드로 열립니다. 사용 처리 후에는 같은 팝업에서 새 QR을 발행할 수 있습니다.
+                    {qrTicket.deferUsageDeduction || qrTicket.fixedQrMode
+                      ? "방문자가 QR을 스캔한 뒤 웹페이지에서 [주차권 사용하기]를 눌렀을 때 서버에서 차감됩니다."
+                      : "방문자 폰으로 스캔하면 서버에 등록된 실제 주차권 코드로 열립니다. 사용 처리 후에는 같은 팝업에서 새 QR을 발행할 수 있습니다."}
                   </p>
                 </div>
               </div>
@@ -2149,7 +2174,7 @@ export default function MerchantDashboard() {
 
               <div className="flex shrink-0 items-center gap-2">
                 <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                  사용 가능 {availablePassesDisplay}
+                  사용 가능 {availablePassesValue}장
                 </span>
               </div>
             </div>
@@ -2260,6 +2285,19 @@ export default function MerchantDashboard() {
               <div className="mt-2 rounded-xl bg-slate-100 px-2.5 py-2 text-[12px] font-medium text-slate-700">{apiStatus}</div>
             ) : null}
 
+            <label className="mt-2 flex items-start gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
+              <input
+                type="checkbox"
+                checked={fixedQrMode}
+                onChange={(event) => setFixedQrMode(event.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0"
+              />
+              <span>
+                <span className="font-semibold text-slate-900">고정 QR 모드</span>
+                <span className="ml-1 text-slate-500">체크 시 QR 발행 때는 차감하지 않고, 방문자가 스캔 후 [주차권 사용하기]를 눌렀을 때 차감됩니다.</span>
+              </span>
+            </label>
+
             <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 type="submit"
@@ -2274,7 +2312,7 @@ export default function MerchantDashboard() {
                 disabled={qrBusy || !canIssueParkingPass}
                 className="flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-[15px] font-semibold text-slate-900 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 sm:py-3.5"
               >
-                {qrBusy ? "QR 서버 등록 중..." : canIssueParkingPass ? "QR Code 발행" : "승인 후 발행 가능"}
+                {qrBusy ? "QR 서버 등록 중..." : canIssueParkingPass ? (fixedQrMode ? "고정 QR 등록" : "QR Code 발행") : "승인 후 발행 가능"}
               </button>
             </div>
           </form>
@@ -2479,7 +2517,7 @@ export default function MerchantDashboard() {
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">사용 가능 주차권</span>
-                <span className="font-medium">{availablePassesDisplay}</span>
+                <span className="font-medium">{availablePassesValue}장</span>
               </div>
             </div>
           </div>
