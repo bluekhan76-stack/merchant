@@ -449,13 +449,15 @@ function deepLinkFor(phone, inviteId, inviteCode) {
   return url.toString();
 }
 
-function visitorClaimLinkFor(inviteId, inviteCode) {
+function visitorClaimLinkFor(inviteId, inviteCode, pinCode) {
   const inviteKey = inviteCode || inviteId || "";
   // 고정 QR 옵션용 링크입니다.
   // QR 스캔만으로는 차감하지 않고, 방문자 페이지에서 [주차권 사용하기] 버튼을 눌렀을 때만 차감 API를 호출합니다.
+  // 서버가 발급한 4자리 PIN을 함께 전달하여, claim API에서 PIN이 맞을 때만 주차권을 활성화합니다.
   const url = new URL(window.location.origin);
   url.searchParams.set("code", inviteKey);
   url.searchParams.set("claim", "1");
+  if (pinCode) url.searchParams.set("pin", String(pinCode).padStart(4, "0"));
   return url.toString();
 }
 
@@ -628,6 +630,7 @@ async function requestParkingPass({
   issueMethod,
   deliveryMethod,
   deferUsageDeduction = false,
+  requirePinCode = false,
   merchantShopName,
   merchantOwnerName,
   merchantPhone,
@@ -655,7 +658,8 @@ async function requestParkingPass({
       ticketValidUntil,
       issueMethod: issueMethod || undefined,
       deliveryMethod: deliveryMethod || undefined,
-      deferUsageDeduction: Boolean(deferUsageDeduction),
+      ...(deferUsageDeduction ? { deferUsageDeduction: true } : {}),
+      ...(requirePinCode ? { requirePinCode: true, pinCodeLength: 4 } : {}),
       merchantShopName: merchantShopName || undefined,
       merchantOwnerName: merchantOwnerName || undefined,
       merchantPhone: merchantPhone || undefined,
@@ -743,6 +747,7 @@ async function requestQrParkingPass({
   ticketValidUntil,
   merchant,
   deferUsageDeduction = false,
+  requirePinCode = false,
 }) {
   return requestParkingPass({
     phone: "",
@@ -756,9 +761,10 @@ async function requestQrParkingPass({
     usageLimit,
     ticketValidFrom,
     ticketValidUntil,
-    issueMethod: "qr",
-    deliveryMethod: "qr",
+    issueMethod: deferUsageDeduction ? "fixed_qr" : "qr",
+    deliveryMethod: deferUsageDeduction ? "fixed_qr" : "qr",
     deferUsageDeduction,
+    requirePinCode,
     merchantShopName: merchant?.shopName || "",
     merchantOwnerName: merchant?.ownerName || "",
     merchantPhone: merchant?.phone || "",
@@ -1535,7 +1541,7 @@ export default function MerchantDashboard() {
       ...buildPendingPass({ form: nextForm, merchant, invites }),
       visitorName: form.visitorName.trim() || "QR 방문자",
       phone: fixedQrMode ? "고정 QR 스캔 발급" : "QR 스캔 발급",
-      issueMethod: "qr",
+      issueMethod: fixedQrMode ? "fixed_qr" : "qr",
       fixedQrMode,
       deferUsageDeduction: fixedQrMode,
     };
@@ -1590,12 +1596,14 @@ export default function MerchantDashboard() {
         ticketValidUntil: validUntil.toISOString(),
         merchant,
         deferUsageDeduction: isDeferredQr,
+        requirePinCode: isDeferredQr,
       });
 
       const inviteId = result.inviteId || result.requestId || result.id || safeUuid();
       const inviteCode = result.inviteCode || result.code || inviteId;
+      const pinCode = result.pinCode || result.qrPinCode || result.fixedQrPinCode || result.claimPinCode || "";
       const inviteUrl = isDeferredQr
-        ? visitorClaimLinkFor(inviteId, inviteCode)
+        ? visitorClaimLinkFor(inviteId, inviteCode, pinCode)
         : deepLinkFor("", inviteId, inviteCode);
 
       const { history, visitCount, ...newQrPass } = qrPass;
@@ -1616,9 +1624,10 @@ export default function MerchantDashboard() {
         ticketValidUntil: validUntil.toISOString(),
         usageLimit: Number(qrPass.usageLimit || 1),
         status: isDeferredQr ? "사용 대기" : "발행 완료",
-        issueMethod: "qr",
+        issueMethod: isDeferredQr ? "fixed_qr" : "qr",
         fixedQrMode: isDeferredQr,
         deferUsageDeduction: isDeferredQr,
+        pinCode: isDeferredQr ? pinCode : "",
         createdAt: nowIso(),
         serverSynced: true,
         serverInviteUrl: inviteUrl,
@@ -1957,6 +1966,9 @@ export default function MerchantDashboard() {
                 <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
                   <p><span className="font-medium text-slate-700">방문자명:</span> {qrTicket.visitorName}</p>
                   <p><span className="font-medium text-slate-700">상태:</span> {qrTicket.deferUsageDeduction || qrTicket.fixedQrMode ? "사용 대기" : "서버 등록 완료"}</p>
+                  {qrTicket.deferUsageDeduction || qrTicket.fixedQrMode ? (
+                    <p><span className="font-medium text-slate-700">PIN Code:</span> <span className="font-mono text-lg font-black text-slate-950">{qrTicket.pinCode || "서버 응답 없음"}</span></p>
+                  ) : null}
                   <p><span className="font-medium text-slate-700">대상 차단기:</span> {qrTicket.parkingGateNames.join(", ")}</p>
                   <p><span className="font-medium text-slate-700">유효시간:</span> {displayDuration(qrTicket.durationMinutes)}</p>
                 </div>
@@ -2008,7 +2020,7 @@ export default function MerchantDashboard() {
                   )}
                   <p className="text-center text-xs leading-relaxed text-slate-500">
                     {qrTicket.deferUsageDeduction || qrTicket.fixedQrMode
-                      ? "방문자가 QR을 스캔한 뒤 웹페이지에서 [주차권 사용하기]를 눌렀을 때 서버에서 차감됩니다."
+                      ? "방문자가 QR을 스캔한 뒤 웹페이지에서 [주차권 사용하기]를 누르면 서버가 PIN Code를 검증한 후 차감합니다."
                       : "방문자 폰으로 스캔하면 서버에 등록된 실제 주차권 코드로 열립니다. 사용 처리 후에는 같은 팝업에서 새 QR을 발행할 수 있습니다."}
                   </p>
                 </div>
@@ -2294,7 +2306,7 @@ export default function MerchantDashboard() {
               />
               <span>
                 <span className="font-semibold text-slate-900">고정 QR 모드</span>
-                <span className="ml-1 text-slate-500">체크 시 QR 발행 때는 차감하지 않고, 방문자가 스캔 후 [주차권 사용하기]를 눌렀을 때 차감됩니다.</span>
+                <span className="ml-1 text-slate-500">체크 시 QR 발행 때는 차감하지 않고, 서버가 4자리 PIN을 발급합니다. 방문자가 스캔 후 [주차권 사용하기]를 누르면 PIN 검증 후 차감됩니다.</span>
               </span>
             </label>
 
