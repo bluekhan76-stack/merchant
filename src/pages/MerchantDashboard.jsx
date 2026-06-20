@@ -967,25 +967,38 @@ export default function MerchantDashboard() {
 
   function updateMerchantUsageFromApi(result, fallbackIncrement = 1) {
     setMerchant((prev) => {
-      const apiUsedCount = Number(result?.merchantUsedCount);
+      const increment = Math.max(Number(fallbackIncrement || 1), 1);
+      const apiUsedCount = Number(result?.merchantUsedCount ?? result?.usedCount);
       const nextUsedCount = Number.isFinite(apiUsedCount)
-        ? apiUsedCount
-        : Number(prev.usedCount || 0) + Number(fallbackIncrement || 1);
-
-      const nextAdditionalPasses = Number(
-        result?.merchantAdditionalPasses ?? prev.additionalPasses ?? 0
-      );
+        ? Math.floor(apiUsedCount)
+        : Number(prev.usedCount || 0) + increment;
 
       const nextPlanType = String(result?.merchantPlanType || prev.planType || "subscription").toLowerCase() === "payg" ? "payg" : "subscription";
       const nextUnitPrice = Number(result?.merchantUnitPrice ?? prev.unitPrice ?? 0);
+      const nextAdditionalPasses = Number(
+        result?.merchantAdditionalPasses ?? result?.additionalPasses ?? prev.additionalPasses ?? 0
+      );
       const nextMonthlyQuota = nextPlanType === "payg" ? 0 : Number(
-        result?.merchantMonthlyQuota ?? result?.merchantPlanLimit ?? prev.monthlyQuota ?? prev.planLimit ?? 0
+        result?.merchantMonthlyQuota ?? result?.merchantPlanLimit ?? result?.monthlyQuota ?? result?.planLimit ?? prev.monthlyQuota ?? prev.planLimit ?? 0
       );
 
-      const apiTodayIssuedCount = Number(result?.merchantTodayIssuedCount);
+      const apiAvailablePasses = Number(
+        result?.merchantAvailablePasses ??
+        result?.availablePasses ??
+        result?.merchantRemainingPasses ??
+        result?.remainingPasses
+      );
+      const prevAvailablePasses = getAvailablePasses(prev);
+      const nextAvailablePasses = nextPlanType === "payg"
+        ? prevAvailablePasses
+        : Number.isFinite(apiAvailablePasses)
+          ? Math.max(Math.floor(apiAvailablePasses), 0)
+          : Math.max(prevAvailablePasses - increment, 0);
+
+      const apiTodayIssuedCount = Number(result?.merchantTodayIssuedCount ?? result?.todayIssuedCount);
       const nextTodayIssuedCount = Number.isFinite(apiTodayIssuedCount)
-        ? apiTodayIssuedCount
-        : getServerTodayIssuedCount(prev) + Number(fallbackIncrement || 1);
+        ? Math.floor(apiTodayIssuedCount)
+        : getServerTodayIssuedCount(prev) + increment;
 
       const nextMerchant = {
         ...prev,
@@ -997,7 +1010,9 @@ export default function MerchantDashboard() {
         monthlyQuota: nextMonthlyQuota,
         planLimit: nextMonthlyQuota,
         totalLimit: nextMonthlyQuota === -1 || nextPlanType === "payg" ? -1 : nextMonthlyQuota + nextAdditionalPasses,
-        todayIssuedDate: result?.merchantTodayIssuedDate || getKstDateKey(),
+        availablePasses: nextAvailablePasses,
+        remainingPasses: nextAvailablePasses,
+        todayIssuedDate: result?.merchantTodayIssuedDate || result?.todayIssuedDate || getKstDateKey(),
         todayIssuedCount: nextTodayIssuedCount,
       };
 
