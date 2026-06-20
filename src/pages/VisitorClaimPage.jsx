@@ -3,8 +3,9 @@ import React, { useMemo, useState } from "react";
 const API_BASE_URL =
   (typeof import.meta !== "undefined" &&
     import.meta.env &&
-    import.meta.env.VITE_VISITOR_API_BASE_URL) ||
-  "https://bn7n8biah0.execute-api.ap-northeast-2.amazonaws.com";
+    (import.meta.env.VITE_VISITOR_API_BASE_URL ||
+      import.meta.env.VITE_API_BASE_URL)) ||
+  "https://8q72reoak2.execute-api.ap-northeast-2.amazonaws.com";
 
 const API_PATHS = {
   claimPass: "/api/visitor/claim",
