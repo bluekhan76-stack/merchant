@@ -452,9 +452,11 @@ function deepLinkFor(phone, inviteId, inviteCode) {
 function visitorClaimLinkFor(inviteId, inviteCode, pinCode) {
   const inviteKey = inviteCode || inviteId || "";
   // 고정 QR 옵션용 링크입니다.
-  // QR 스캔만으로는 차감하지 않고, 방문자 페이지에서 [주차권 사용하기] 버튼을 눌렀을 때만 차감 API를 호출합니다.
-  // 서버가 발급한 4자리 PIN을 함께 전달하여, claim API에서 PIN이 맞을 때만 주차권을 활성화합니다.
+  // 휴대폰 기본 카메라로 스캔하면 /claim 웹페이지가 열립니다.
+  // 앱 내부 QR 스캔은 같은 URL에서 code/pin을 파싱하여 앱에서 바로 claim API를 호출합니다.
+  // PIN은 화면에 표시하지 않고 QR URL에만 포함하여 도용/수동 입력을 어렵게 합니다.
   const url = new URL(window.location.origin);
+  url.pathname = "/claim";
   url.searchParams.set("code", inviteKey);
   url.searchParams.set("claim", "1");
   if (pinCode) url.searchParams.set("pin", String(pinCode).padStart(4, "0"));
@@ -1981,9 +1983,6 @@ export default function MerchantDashboard() {
                 <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
                   <p><span className="font-medium text-slate-700">방문자명:</span> {qrTicket.visitorName}</p>
                   <p><span className="font-medium text-slate-700">상태:</span> {qrTicket.deferUsageDeduction || qrTicket.fixedQrMode ? "사용 대기" : "서버 등록 완료"}</p>
-                  {qrTicket.deferUsageDeduction || qrTicket.fixedQrMode ? (
-                    <p><span className="font-medium text-slate-700">PIN Code:</span> <span className="font-mono text-lg font-black text-slate-950">{qrTicket.pinCode || "서버 응답 없음"}</span></p>
-                  ) : null}
                   <p><span className="font-medium text-slate-700">대상 차단기:</span> {qrTicket.parkingGateNames.join(", ")}</p>
                   <p><span className="font-medium text-slate-700">유효시간:</span> {displayDuration(qrTicket.durationMinutes)}</p>
                 </div>
@@ -2035,7 +2034,7 @@ export default function MerchantDashboard() {
                   )}
                   <p className="text-center text-xs leading-relaxed text-slate-500">
                     {qrTicket.deferUsageDeduction || qrTicket.fixedQrMode
-                      ? "방문자가 QR을 스캔한 뒤 웹페이지에서 [주차권 사용하기]를 누르면 서버가 PIN Code를 검증한 후 차감합니다."
+                      ? "휴대폰 카메라로 스캔하면 웹페이지가 열리고, 앱 내부 QR 스캔으로 스캔하면 앱에서 바로 주차권을 등록합니다. PIN은 화면에 표시되지 않고 서버에서만 검증됩니다."
                       : "방문자 폰으로 스캔하면 서버에 등록된 실제 주차권 코드로 열립니다. 사용 처리 후에는 같은 팝업에서 새 QR을 발행할 수 있습니다."}
                   </p>
                 </div>
@@ -2321,7 +2320,7 @@ export default function MerchantDashboard() {
               />
               <span>
                 <span className="font-semibold text-slate-900">고정 QR 모드</span>
-                <span className="ml-1 text-slate-500">체크 시 QR 발행 때는 차감하지 않고, 서버가 4자리 PIN을 발급합니다. 방문자가 스캔 후 [주차권 사용하기]를 누르면 PIN 검증 후 차감됩니다.</span>
+                <span className="ml-1 text-slate-500">체크 시 QR 발행 때는 차감하지 않습니다. 서버가 숨겨진 4자리 PIN을 발급하고, 방문자가 웹 또는 앱에서 QR을 사용할 때 PIN 검증 후 차감됩니다.</span>
               </span>
             </label>
 

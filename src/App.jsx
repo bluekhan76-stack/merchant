@@ -6,6 +6,7 @@ import AdminDashboard from "./pages/AdminDashboard.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import MerchantDashboard from "./pages/MerchantDashboard.jsx";
 import SignupPage from "./pages/SignupPage.jsx";
+import VisitorClaimPage from "./pages/VisitorClaimPage.jsx";
 
 function RequireAuth({ allowedRoles, children }) {
   const location = useLocation();
@@ -26,7 +27,15 @@ function RequireAuth({ allowedRoles, children }) {
 }
 
 function RootPage() {
-  const searchCode = new URLSearchParams(window.location.search).get("code");
+  const params = new URLSearchParams(window.location.search);
+  const searchCode = params.get("code");
+  const isClaimQr = params.get("claim") === "1";
+
+  // 기존 QR: /?code=xxxx -> 앱 바로 이동
+  // 고정 QR: /?code=xxxx&claim=1 또는 /claim?code=xxxx -> VisitorClaimPage 표시
+  if (searchCode && isClaimQr) {
+    return <VisitorClaimPage />;
+  }
 
   if (searchCode) {
     return <OpenBridgePage />;
@@ -56,6 +65,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<RootPage />} />
         <Route path="/open" element={<OpenBridgePage />} />
+        <Route path="/claim" element={<VisitorClaimPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route

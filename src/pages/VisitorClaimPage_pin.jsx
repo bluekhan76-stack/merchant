@@ -74,15 +74,12 @@ export default function VisitorClaimPage() {
         <h1 className="mt-2 text-2xl font-bold">주차권 사용 확인</h1>
 
         <p className="mt-4 text-sm leading-6 text-slate-600">
-          QR Code 스캔만으로는 주차권이 차감되지 않습니다. 아래 버튼을 누르면 서버가 PIN Code를 검증한 뒤 상가 주차권이 1회 차감되고 출차용 주차권이 활성화됩니다.
+          QR Code 스캔만으로는 주차권이 차감되지 않습니다. 아래 버튼을 누르면 서버가 QR 내부 보안값을 검증한 뒤 상가 주차권이 1회 차감되고 출차용 주차권이 활성화됩니다.
         </p>
 
         {inviteCode ? (
           <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-xs text-slate-500 ring-1 ring-slate-200">
-            코드: <span className="font-mono font-semibold text-slate-800">{inviteCode}</span>
-            {pinCode ? (
-              <div className="mt-1">PIN: <span className="font-mono font-semibold text-slate-800">{pinCode}</span></div>
-            ) : null}
+            주차권 코드가 확인되었습니다.
           </div>
         ) : null}
 
@@ -118,7 +115,7 @@ export default function VisitorClaimPage() {
         )}
 
         <p className="mt-4 text-xs leading-5 text-slate-500">
-          앱이 설치되어 있지 않으면 앱 설치 후 같은 QR 링크를 다시 열어 주세요.
+          앱이 설치되어 있으면 앱 내부의 QR 스캔 기능을 사용해도 됩니다. 앱이 없으면 앱 설치 후 같은 QR 링크를 다시 열어 주세요.
         </p>
       </div>
     </div>
