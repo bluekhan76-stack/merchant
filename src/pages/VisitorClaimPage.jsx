@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from "react";
 
 const API_BASE_URL =
-  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_API_BASE_URL) ||
-  "https://8q72reoak2.execute-api.ap-northeast-2.amazonaws.com";
+  (typeof import.meta !== "undefined" &&
+    import.meta.env &&
+    import.meta.env.VITE_VISITOR_API_BASE_URL) ||
+  "https://bn7n8biah0.execute-api.ap-northeast-2.amazonaws.com";
 
 const API_PATHS = {
-  claimPass: "/public/passes/claim",
+  claimPass: "/api/visitor/claim",
 };
 
 function getInviteCodeFromLocation() {
@@ -33,6 +35,11 @@ export default function VisitorClaimPage() {
       return;
     }
 
+    if (!pinCode) {
+      setError("QR Code 보안값이 없습니다. 상가에서 새 QR Code를 다시 발행해 주세요.");
+      return;
+    }
+
     setLoading(true);
     setError("");
     setMessage("");
@@ -43,7 +50,11 @@ export default function VisitorClaimPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ inviteCode, pinCode }),
+        body: JSON.stringify({
+          inviteCode,
+          pinCode,
+          deviceType: "web",
+        }),
       });
 
       const data = await response.json().catch(() => ({}));
@@ -63,8 +74,8 @@ export default function VisitorClaimPage() {
   }
 
   function openApp() {
-    const token = result?.appToken || result?.token || inviteCode;
-    window.location.href = `parkingcruise://pass?token=${encodeURIComponent(token)}`;
+    const token = result?.parkingToken || result?.appToken || result?.token || inviteCode;
+    window.location.href = `bluekhan://invite?code=${encodeURIComponent(inviteCode)}&token=${encodeURIComponent(token)}`;
   }
 
   return (
